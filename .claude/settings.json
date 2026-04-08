@@ -39,7 +39,9 @@
       "Bash(vercel --yes --prod --scope jxwayne890s-projects -e VITE_SUPABASE_URL=https://npfqmdnniokrlgterwnp.supabase.co -e VITE_SUPABASE_ANON_KEY=sb_publishable_T6i3jEja0MTrnxhjfIE8wg_YiW9CTK4 -e VITE_API_URL=http://187.77.176.81:3000)",
       "Bash(vercel ls:*)",
       "Bash(vercel env:*)",
-      "Bash(vercel --yes --prod --scope jxwayne890s-projects)"
+      "Bash(vercel --yes --prod --scope jxwayne890s-projects)",
+      "Bash(curl -s https://e3ctest.vercel.app/)",
+      "Bash(curl -s https://e3ctest.vercel.app/assets/index-DSfN4pUQ.js)"
     ]
   }
 }

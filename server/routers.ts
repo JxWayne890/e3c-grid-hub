@@ -29,6 +29,15 @@ export const appRouter = router({
 
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
+    updateName: protectedProcedure
+      .input(z.object({ fullName: z.string().min(1).max(100) }))
+      .mutation(async ({ ctx, input }) => {
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(ctx.user.id, {
+          user_metadata: { full_name: input.fullName },
+        });
+        if (error) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error.message });
+        return { success: true };
+      }),
   }),
 
   beta: router({
@@ -207,7 +216,7 @@ export const appRouter = router({
           orgName: ctx.user.orgName!,
           orgTier: ctx.user.orgTier!,
           userId: ctx.user.id,
-          userName: ctx.user.email,
+          userName: ctx.user.fullName || ctx.user.email,
           business: {
             totalSignups: totalSignups ?? 0,
             recentSignups: signups as any[],

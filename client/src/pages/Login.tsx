@@ -7,6 +7,8 @@ export default function Login() {
   const { signIn, signUp, isAuthenticated } = useAuth();
   const [, navigate] = useLocation();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +31,7 @@ export default function Login() {
         await signIn(email, password);
         navigate("/crm");
       } else {
-        await signUp(email, password);
+        await signUp(email, password, { firstName, lastName });
         setSignupSuccess(true);
       }
     } catch (err: any) {
@@ -70,6 +72,38 @@ export default function Login() {
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="rounded-xl p-6 flex flex-col gap-4" style={{ background: "oklch(0.15 0.009 265)", border: "1px solid oklch(0.22 0.009 265)" }}>
+              {mode === "signup" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[oklch(0.55_0.01_265)] text-xs uppercase tracking-widest mb-1.5">
+                      First Name
+                    </label>
+                    <input
+                      type="text"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                      className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-[oklch(0.38_0.01_265)] outline-none focus:ring-1 focus:ring-[oklch(0.78_0.12_75/50%)]"
+                      style={{ background: "oklch(0.12 0.008 265)", border: "1px solid oklch(0.25 0.009 265)" }}
+                      placeholder="John"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[oklch(0.55_0.01_265)] text-xs uppercase tracking-widest mb-1.5">
+                      Last Name
+                    </label>
+                    <input
+                      type="text"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                      className="w-full px-3 py-2.5 rounded-lg text-sm text-white placeholder-[oklch(0.38_0.01_265)] outline-none focus:ring-1 focus:ring-[oklch(0.78_0.12_75/50%)]"
+                      style={{ background: "oklch(0.12 0.008 265)", border: "1px solid oklch(0.25 0.009 265)" }}
+                      placeholder="Doe"
+                    />
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-[oklch(0.55_0.01_265)] text-xs uppercase tracking-widest mb-1.5">
                   Email

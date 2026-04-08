@@ -7,6 +7,7 @@ export type TrpcContext = {
   user: {
     id: string;
     email: string;
+    fullName: string | null;
     orgId: string | null;
     orgRole: string | null;
     orgTier: string | null;
@@ -51,6 +52,7 @@ export async function createContext(
       user: {
         id: user.id,
         email: user.email ?? "",
+        fullName: user.user_metadata?.full_name || user.user_metadata?.name || null,
         orgId: membership?.org_id ?? null,
         orgRole: membership?.role ?? null,
         orgTier: org?.tier ?? null,

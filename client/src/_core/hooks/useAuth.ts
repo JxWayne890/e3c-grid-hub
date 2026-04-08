@@ -32,8 +32,18 @@ export function useAuth() {
     if (error) throw error;
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+  const signUp = useCallback(async (email: string, password: string, options?: { firstName?: string; lastName?: string }) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: options?.firstName || "",
+          last_name: options?.lastName || "",
+          full_name: [options?.firstName, options?.lastName].filter(Boolean).join(" ") || "",
+        },
+      },
+    });
     if (error) throw error;
   }, []);
 
