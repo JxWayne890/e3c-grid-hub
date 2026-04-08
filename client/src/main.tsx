@@ -9,10 +9,12 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
+const API_URL = import.meta.env.VITE_API_URL || "";
+
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: "/api/trpc",
+      url: `${API_URL}/api/trpc`,
       transformer: superjson,
       async headers() {
         const { data } = await supabase.auth.getSession();
