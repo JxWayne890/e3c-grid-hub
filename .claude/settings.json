@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://openclaw-c1cf.srv1568356.hstgr.cloud/api/status)",
+      "Bash(curl -s https://openclaw-c1cf.srv1568356.hstgr.cloud/v1/chat/completions -H 'Content-Type: application/json' -H 'Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in' -d '{:*)",
+      "Bash(curl -s https://openclaw-c1cf.srv1568356.hstgr.cloud/api/status -H 'Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in')",
+      "Bash(curl -s https://openclaw-c1cf.srv1568356.hstgr.cloud/ -H 'Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://openclaw-c1cf.srv1568356.hstgr.cloud/api/sessions -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://openclaw-c1cf.srv1568356.hstgr.cloud/v1/responses -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s https://openclaw-c1cf.srv1568356.hstgr.cloud/api -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s https://openclaw-c1cf.srv1568356.hstgr.cloud/api/health -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://openclaw-c1cf.srv1568356.hstgr.cloud/rpc -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST https://openclaw-c1cf.srv1568356.hstgr.cloud/tools/invoke -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\" -H \"Content-Type: application/json\" -d '{}')",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://openclaw-c1cf.srv1568356.hstgr.cloud/mcp -H \"Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in\")",
+      "Bash(curl -s -X POST https://openclaw-c1cf.srv1568356.hstgr.cloud/tools/invoke -H 'Content-Type: application/json' -H 'Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in' -d '{\"tool\": \"computer:shell\", \"input\": {\"command\": \"echo hello\"}}')",
+      "Bash(curl -s -m 10 -X POST https://openclaw-c1cf.srv1568356.hstgr.cloud/tools/invoke -H 'Content-Type: application/json' -H 'Authorization: Bearer qQLVdWHNlrvrvqWMJVkyPH7eDuYkT9in' -d '{\"tool\": \"computer:shell\", \"input\": {\"command\": \"echo hello\"}}')",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(pnpm dev:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(jobs -l)",
+      "Bash(pnpm check:*)",
+      "Bash(pnpm add:*)",
+      "Read(//private/tmp/claude-501/-Users-john-Desktop-Backed-WorkFlows--e3c-grid-hub-main/**)",
+      "Bash(node -e ':*)",
+      "Bash(node -e:*)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:deepwiki.com)",
+      "Bash(gh auth:*)"
+    ]
+  }
+}
