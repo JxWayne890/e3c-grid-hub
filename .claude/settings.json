@@ -28,7 +28,18 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:deepwiki.com)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://187.77.176.81:3000/api/trpc/system.health?input=%7B%22timestamp%22%3A1%7D)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' 'http://187.77.176.81:3000/api/trpc/system.health?input={\"timestamp\":1}')",
+      "Bash(vercel --version)",
+      "Bash(npm install:*)",
+      "Bash(vercel login:*)",
+      "Bash(vercel --yes --prod -e VITE_SUPABASE_URL=https://npfqmdnniokrlgterwnp.supabase.co -e VITE_SUPABASE_ANON_KEY=sb_publishable_T6i3jEja0MTrnxhjfIE8wg_YiW9CTK4 -e VITE_API_URL=http://187.77.176.81:3000)",
+      "Bash(vercel --yes --prod --scope jxwayne890s-projects -e VITE_SUPABASE_URL=https://npfqmdnniokrlgterwnp.supabase.co -e VITE_SUPABASE_ANON_KEY=sb_publishable_T6i3jEja0MTrnxhjfIE8wg_YiW9CTK4 -e VITE_API_URL=http://187.77.176.81:3000)",
+      "Bash(vercel ls:*)",
+      "Bash(vercel env:*)",
+      "Bash(vercel --yes --prod --scope jxwayne890s-projects)"
     ]
   }
 }

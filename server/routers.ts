@@ -189,12 +189,32 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        // Fetch live business data for context
+        const [signupsRes, notesRes, memberRes] = await Promise.all([
+          ctx.supabase!.from("beta_signups").select("name, email, industry, created_at").order("created_at", { ascending: false }).limit(10),
+          ctx.supabase!.from("contact_notes").select("id", { count: "exact", head: true }),
+          ctx.supabase!.from("org_members").select("referral_code").eq("user_id", ctx.user.id).eq("org_id", ctx.user.orgId!).single(),
+        ]);
+
+        const signups = signupsRes.data ?? [];
+        const industries = Array.from(new Set(signups.map((s: any) => s.industry).filter(Boolean)));
+
+        // Get total count separately
+        const { count: totalSignups } = await ctx.supabase!.from("beta_signups").select("id", { count: "exact", head: true });
+
         const reply = await chatWithOpenClaw(input.messages, {
           orgId: ctx.user.orgId!,
           orgName: ctx.user.orgName!,
           orgTier: ctx.user.orgTier!,
           userId: ctx.user.id,
           userName: ctx.user.email,
+          business: {
+            totalSignups: totalSignups ?? 0,
+            recentSignups: signups as any[],
+            topIndustries: industries as string[],
+            referralCode: memberRes.data?.referral_code ?? null,
+            totalNotes: notesRes.count ?? 0,
+          },
         });
 
         const allMessages = [
