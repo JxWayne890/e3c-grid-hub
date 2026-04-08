@@ -13,6 +13,7 @@ export type BusinessContext = {
   recentSignups: Array<{ name: string; email: string; industry: string; created_at: string }>;
   topIndustries: string[];
   referralCode: string | null;
+  referralUrl: string | null;
   totalNotes: number;
 };
 
@@ -290,17 +291,49 @@ CURRENT BUSINESS DATA FOR "${context.orgName}":
 - Total interaction notes: ${biz.totalNotes}
 - Top industries: ${biz.topIndustries.length > 0 ? biz.topIndustries.join(", ") : "none yet"}
 - User's referral code: ${biz.referralCode || "not assigned"}
+- User's referral link: ${biz.referralUrl || "not available"}
 - Recent signups (last 10):
 ${biz.recentSignups.length > 0 ? biz.recentSignups.map((s) => `  * ${s.name} (${s.email}) — ${s.industry}, signed up ${s.created_at}`).join("\n") : "  (none yet)"}
 
 When the user asks about their dashboard, contacts, signups, industries, or referrals, use this REAL data above. Do NOT make up numbers or placeholder data.`
     : "\nNo business data loaded yet.";
 
+  const appCapabilities = `
+APP CAPABILITIES — what you can help with:
+1. **QR Code & Referral Link**: The user already has a personal QR code and referral link generated in the app.
+   - Their referral code is: ${biz?.referralCode || "not assigned"}
+   - Their referral link is: ${biz?.referralUrl || "not available"}
+   - When they ask for "my QR code" or "my referral link", give them the link above directly.
+   - Tell them they can click the "QR" button in the top nav of the CRM to view, copy, and download their QR code as a PNG.
+   - The QR code points to the signup form with their referral code pre-filled.
+
+2. **Contact Management**: The CRM dashboard shows all beta signups for their organization.
+   - They can search contacts by name, email, industry, or referral code.
+   - They can click any contact to see details and add interaction notes.
+   - They can export all contacts as CSV using the download button.
+   - They can filter to "My Referrals" to see only contacts attributed to their referral code.
+
+3. **Notes**: They can add timestamped interaction notes on any contact (call logs, follow-ups, etc.).
+
+4. **Email**: When someone signs up through their referral link, the system automatically:
+   - Sends a notification email to the org owner
+   - Sends a confirmation email to the new signup
+
+5. **Organization**: They manage their organization from the CRM. Members can be added with different roles (owner, admin, member).
+
+RESPONSE GUIDELINES:
+- When asked for a QR code or referral link, provide the ACTUAL link from the data above. Do NOT ask what URL it should point to — it's already configured.
+- When asked about contacts or signups, reference the REAL data above.
+- When asked to do something the app can do (view contacts, add notes, export CSV), tell them HOW to do it in the app UI.
+- Be specific — reference actual button names, locations, and features.
+- If they ask you to do something the app cannot do yet, be honest and say it's not available yet.`;
+
   return `You are the AI assistant for "${context.orgName}".
 You are speaking with ${context.userName}.
 
 ${tierInstructions}
 ${businessData}
+${appCapabilities}
 
 CRITICAL SECURITY RULES:
 - You ONLY have access to data from organization "${context.orgName}".

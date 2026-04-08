@@ -213,6 +213,9 @@ export const appRouter = router({
             recentSignups: signups as any[],
             topIndustries: industries as string[],
             referralCode: memberRes.data?.referral_code ?? null,
+            referralUrl: memberRes.data?.referral_code
+              ? `${ENV.appUrl}/join?ref=${encodeURIComponent(memberRes.data.referral_code)}`
+              : null,
             totalNotes: notesRes.count ?? 0,
           },
         });
