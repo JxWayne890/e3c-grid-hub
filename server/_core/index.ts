@@ -75,10 +75,11 @@ async function startServer() {
     next();
   });
 
-  // HTTPS redirect in production
+  // HTTPS redirect in production (only when behind a reverse proxy that sets x-forwarded-proto)
   if (ENV.isProduction) {
     app.use((req, res, next) => {
-      if (req.headers["x-forwarded-proto"] !== "https") {
+      const proto = req.headers["x-forwarded-proto"];
+      if (proto && proto !== "https") {
         return res.redirect(301, `https://${req.headers.host}${req.url}`);
       }
       next();
