@@ -297,11 +297,11 @@ export function registerMcpEndpoint(app: Express) {
     };
 
     await mcpServer.connect(transport);
+    await transport.handleRequest(req, res);
 
+    // Store session AFTER first request (sessionId is set during handleRequest)
     const sid = (transport as any).sessionId;
     if (sid) sessions.set(sid, { server: mcpServer, transport });
-
-    await transport.handleRequest(req, res);
   });
 
   // Handle GET for SSE stream
