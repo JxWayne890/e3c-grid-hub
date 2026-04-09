@@ -7,6 +7,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { ENV } from "./env";
+import { registerMcpEndpoint } from "../mcp";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -85,6 +86,9 @@ async function startServer() {
       next();
     });
   }
+
+  // MCP server endpoint (for OpenClaw tool calling)
+  registerMcpEndpoint(app);
 
   // tRPC API
   app.use(
