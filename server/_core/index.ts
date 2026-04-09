@@ -32,9 +32,15 @@ async function startServer() {
   const app = express();
   const server = createServer(app);
 
-  // Body parser with safe limits
-  app.use(express.json({ limit: "1mb" }));
-  app.use(express.urlencoded({ limit: "1mb", extended: true }));
+  // Body parser with safe limits (skip /mcp — MCP SDK handles its own parsing)
+  app.use((req, res, next) => {
+    if (req.path === "/mcp") return next();
+    express.json({ limit: "1mb" })(req, res, next);
+  });
+  app.use((req, res, next) => {
+    if (req.path === "/mcp") return next();
+    express.urlencoded({ limit: "1mb", extended: true })(req, res, next);
+  });
 
   // CORS — allow frontend (Vercel) to talk to this API
   app.use((req, res, next) => {
