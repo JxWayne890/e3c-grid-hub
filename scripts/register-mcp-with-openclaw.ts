@@ -16,9 +16,8 @@ const DEVICE_ID = process.env.OPENCLAW_DEVICE_ID!;
 const API_URL = process.env.APP_URL || "http://localhost:3000";
 
 // The MCP server URL that OpenClaw will connect to
-// Since the API and OpenClaw are on the same VPS, use the internal Docker network
-// or the public URL if they're not on the same machine
-const MCP_URL = `${API_URL}/mcp`;
+// Must be reachable from the OpenClaw Docker container — use the public API URL
+const MCP_URL = "https://api-e3c.srv1568356.hstgr.cloud/mcp";
 
 console.log("Registering CRM MCP server with OpenClaw...");
 console.log(`  OpenClaw: ${OPENCLAW_URL}`);
@@ -55,14 +54,32 @@ ws.on("message", (data: WebSocket.Data) => {
     }));
   }
 
-  // Step 2: After auth, register the MCP server
+  // Step 2: After auth, get current config to obtain base hash
   if (msg.type === "res" && msg.id === "auth-1") {
     if (!msg.ok) {
       console.error("Authentication failed:", msg.error);
       process.exit(1);
     }
 
-    console.log("Authenticated! Registering MCP server...");
+    console.log("Authenticated! Fetching current config...");
+    ws.send(JSON.stringify({
+      type: "req",
+      id: "config-get-1",
+      method: "config.get",
+      params: {},
+    }));
+  }
+
+  // Step 3: Got config — now patch with the base hash
+  if (msg.type === "res" && msg.id === "config-get-1") {
+    if (!msg.ok) {
+      console.error("Failed to get config:", msg.error);
+      process.exit(1);
+    }
+
+    const baseHash = msg.payload?.hash || msg.payload?.baseHash;
+    console.log(`Got config hash: ${baseHash}`);
+    console.log("Registering MCP server...");
 
     const configPatch = {
       mcpServers: {
@@ -77,11 +94,14 @@ ws.on("message", (data: WebSocket.Data) => {
       type: "req",
       id: "config-1",
       method: "config.patch",
-      params: { raw: JSON.stringify(configPatch) },
+      params: {
+        raw: JSON.stringify(configPatch),
+        baseHash,
+      },
     }));
   }
 
-  // Step 3: Confirm config was applied
+  // Step 4: Confirm config was applied
   if (msg.type === "res" && msg.id === "config-1") {
     if (msg.ok) {
       console.log("MCP server registered successfully!");

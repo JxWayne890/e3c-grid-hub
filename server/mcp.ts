@@ -273,46 +273,42 @@ function createMcpServer() {
  * OpenClaw connects to this via streamable-http transport.
  */
 export function registerMcpEndpoint(app: Express) {
-  const mcpServer = createMcpServer();
-
-  // Map to store transports by session ID
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Each session gets its own McpServer + Transport pair
+  const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
   app.post("/mcp", async (req: Request, res: Response) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
-    if (sessionId && transports.has(sessionId)) {
-      // Existing session — reuse transport
-      const transport = transports.get(sessionId)!;
+    if (sessionId && sessions.has(sessionId)) {
+      const { transport } = sessions.get(sessionId)!;
       await transport.handleRequest(req, res);
       return;
     }
 
-    // New session
+    // New session — create fresh server + transport pair
+    const mcpServer = createMcpServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
     });
 
-    // Store for reuse
     transport.onclose = () => {
       const sid = (transport as any).sessionId;
-      if (sid) transports.delete(sid);
+      if (sid) sessions.delete(sid);
     };
 
     await mcpServer.connect(transport);
 
-    // Store by session ID after connection
     const sid = (transport as any).sessionId;
-    if (sid) transports.set(sid, transport);
+    if (sid) sessions.set(sid, { server: mcpServer, transport });
 
     await transport.handleRequest(req, res);
   });
 
-  // Handle GET for SSE stream (if needed)
+  // Handle GET for SSE stream
   app.get("/mcp", async (req: Request, res: Response) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
-    if (sessionId && transports.has(sessionId)) {
-      const transport = transports.get(sessionId)!;
+    if (sessionId && sessions.has(sessionId)) {
+      const { transport } = sessions.get(sessionId)!;
       await transport.handleRequest(req, res);
       return;
     }
@@ -322,10 +318,10 @@ export function registerMcpEndpoint(app: Express) {
   // Handle DELETE for session cleanup
   app.delete("/mcp", async (req: Request, res: Response) => {
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
-    if (sessionId && transports.has(sessionId)) {
-      const transport = transports.get(sessionId)!;
+    if (sessionId && sessions.has(sessionId)) {
+      const { transport } = sessions.get(sessionId)!;
       await transport.handleRequest(req, res);
-      transports.delete(sessionId);
+      sessions.delete(sessionId);
       return;
     }
     res.status(400).json({ error: "No active session" });
