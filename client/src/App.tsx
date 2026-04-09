@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "@/pages/Home";
 import JoinBeta from "@/pages/JoinBeta";
 import CRM from "@/pages/CRM";
+import Pipeline from "@/pages/Pipeline";
 import Login from "@/pages/Login";
 
 function Router() {
@@ -15,6 +16,7 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/join"} component={JoinBeta} />
       <Route path={"/login"} component={Login} />
+      <Route path={"/crm/pipeline"} component={Pipeline} />
       <Route path={"/crm"} component={CRM} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
