@@ -553,6 +553,14 @@ export default function CRM() {
             </span>
           </Link>
           <div className="flex items-center gap-4">
+            {/* CRM nav tabs */}
+            <div className="flex items-center gap-1 mr-2">
+              <Link href="/crm" className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/15 text-primary">Contacts</Link>
+              <Link href="/crm/pipeline" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Pipeline</Link>
+              <Link href="/crm/tasks" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Tasks</Link>
+              <Link href="/crm/dashboard" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Dashboard</Link>
+              <Link href="/crm/settings" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Settings</Link>
+            </div>
             <ThemeToggle />
             {/* QR Code toggle */}
             <button
