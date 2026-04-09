@@ -24,7 +24,7 @@ export async function createOrganization(
 
 export async function addOrgMember(
   supabase: SupabaseClient,
-  data: { orgId: string; userId: string; role: string; email?: string }
+  data: { orgId: string; userId: string; role: string; email?: string; firstName?: string; lastName?: string }
 ) {
   const referralCode = generateReferralCode(data.email ?? data.userId);
 
@@ -33,6 +33,8 @@ export async function addOrgMember(
     user_id: data.userId,
     role: data.role,
     referral_code: referralCode,
+    first_name: data.firstName || "",
+    last_name: data.lastName || "",
   });
 
   if (error) throw new Error(`Failed to add org member: ${error.message}`);

@@ -398,14 +398,21 @@ export const appRouter = router({
           tier: "starter",
         });
 
+        // Pull name from Supabase auth metadata (set during signup)
+        const nameParts = (ctx.user!.fullName || "").split(" ");
+        const firstName = nameParts[0] || "";
+        const lastName = nameParts.slice(1).join(" ") || "";
+
         await addOrgMember(supabaseAdmin, {
           orgId: org.id,
           userId: ctx.user!.id,
           role: "owner",
           email: ctx.user!.email,
+          firstName,
+          lastName,
         });
 
-        await sendWelcomeEmail(ctx.user!.email, ctx.user!.email).catch(() => {});
+        await sendWelcomeEmail(ctx.user!.email, ctx.user!.fullName || ctx.user!.email).catch(() => {});
 
         return org;
       }),
