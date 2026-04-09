@@ -53,7 +53,8 @@
       "Bash(curl -s -D /tmp/mcp-headers -X POST https://api-e3c.srv1568356.hstgr.cloud/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}')",
       "Read(//tmp/**)",
       "Bash(curl -s -X POST https://api-e3c.srv1568356.hstgr.cloud/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: fd8a06e1-a44a-481a-a4f2-f42639fda2c6' -d '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}')",
-      "Bash(curl -s -X POST https://api-e3c.srv1568356.hstgr.cloud/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: fd8a06e1-a44a-481a-a4f2-f42639fda2c6' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}')"
+      "Bash(curl -s -X POST https://api-e3c.srv1568356.hstgr.cloud/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'mcp-session-id: fd8a06e1-a44a-481a-a4f2-f42639fda2c6' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}')",
+      "Bash(curl -s -D /tmp/mcp-h -X POST https://api-e3c.srv1568356.hstgr.cloud/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}')"
     ]
   }
 }

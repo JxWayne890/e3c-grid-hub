@@ -456,6 +456,9 @@ export default function CRM() {
     onSuccess: (data) => {
       setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
       if (data.conversationId) setConversationId(data.conversationId);
+      // Refresh all CRM data — AI may have created/updated contacts, tasks, deals, notes
+      utils.contacts.list.invalidate();
+      utils.tasks.list.invalidate();
     },
   });
 
