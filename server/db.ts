@@ -209,6 +209,125 @@ export async function createContactFromSignup(
   });
 }
 
+// --- Deal operations ---
+
+export async function getDealsForContact(supabase: SupabaseClient, contactId: number) {
+  const { data, error } = await supabase
+    .from("deals")
+    .select("*")
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch deals: ${error.message}`);
+  return data ?? [];
+}
+
+export async function createDeal(
+  supabase: SupabaseClient,
+  data: { org_id: string; contact_id: number; title: string; value?: number; stage?: string; probability?: number; expected_close_date?: string; notes?: string }
+) {
+  const { data: deal, error } = await supabase
+    .from("deals")
+    .insert({
+      org_id: data.org_id,
+      contact_id: data.contact_id,
+      title: data.title,
+      value: data.value ?? 0,
+      stage: data.stage ?? "lead",
+      probability: data.probability ?? 0,
+      expected_close_date: data.expected_close_date || null,
+      notes: data.notes ?? "",
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create deal: ${error.message}`);
+  return deal;
+}
+
+export async function updateDeal(supabase: SupabaseClient, dealId: number, data: Record<string, unknown>) {
+  const { data: deal, error } = await supabase
+    .from("deals")
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq("id", dealId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to update deal: ${error.message}`);
+  return deal;
+}
+
+export async function deleteDeal(supabase: SupabaseClient, dealId: number) {
+  const { error } = await supabase.from("deals").delete().eq("id", dealId);
+  if (error) throw new Error(`Failed to delete deal: ${error.message}`);
+}
+
+// --- Task operations ---
+
+export async function getTasks(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .order("due_date", { ascending: true, nullsFirst: false });
+  if (error) throw new Error(`Failed to fetch tasks: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getTasksForContact(supabase: SupabaseClient, contactId: number) {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("contact_id", contactId)
+    .order("due_date", { ascending: true, nullsFirst: false });
+  if (error) throw new Error(`Failed to fetch tasks: ${error.message}`);
+  return data ?? [];
+}
+
+export async function createTask(
+  supabase: SupabaseClient,
+  data: { org_id: string; contact_id?: number; assigned_to: string; title: string; description?: string; due_date?: string; priority?: string }
+) {
+  const { data: task, error } = await supabase
+    .from("tasks")
+    .insert({
+      org_id: data.org_id,
+      contact_id: data.contact_id || null,
+      assigned_to: data.assigned_to,
+      title: data.title,
+      description: data.description ?? "",
+      due_date: data.due_date || null,
+      priority: data.priority ?? "medium",
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create task: ${error.message}`);
+  return task;
+}
+
+export async function completeTask(supabase: SupabaseClient, taskId: number) {
+  const { data: task, error } = await supabase
+    .from("tasks")
+    .update({ status: "completed", completed_at: new Date().toISOString() })
+    .eq("id", taskId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to complete task: ${error.message}`);
+  return task;
+}
+
+export async function updateTask(supabase: SupabaseClient, taskId: number, data: Record<string, unknown>) {
+  const { data: task, error } = await supabase
+    .from("tasks")
+    .update(data)
+    .eq("id", taskId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to update task: ${error.message}`);
+  return task;
+}
+
+export async function deleteTask(supabase: SupabaseClient, taskId: number) {
+  const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+  if (error) throw new Error(`Failed to delete task: ${error.message}`);
+}
+
 // --- Contact note operations ---
 
 export async function addContactNote(

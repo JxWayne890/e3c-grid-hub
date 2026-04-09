@@ -63,6 +63,38 @@ export type ContactNote = {
   created_at: string;
 };
 
+export type Deal = {
+  id: number;
+  org_id: string;
+  contact_id: number;
+  title: string;
+  value: number;
+  stage: ContactStage;
+  probability: number;
+  expected_close_date: string | null;
+  assigned_to: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskStatus = "pending" | "completed" | "cancelled";
+export type TaskPriority = "low" | "medium" | "high";
+
+export type Task = {
+  id: number;
+  org_id: string;
+  contact_id: number | null;
+  assigned_to: string;
+  title: string;
+  description: string;
+  due_date: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  created_at: string;
+  completed_at: string | null;
+};
+
 export type Conversation = {
   id: string;
   org_id: string;

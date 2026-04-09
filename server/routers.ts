@@ -6,6 +6,8 @@ import {
   insertBetaSignup, getBetaSignups, addContactNote, getNotesForContact, deleteContactNote,
   createOrganization, addOrgMember, getContacts, getContact, createContact, updateContact,
   updateContactStage, deleteContact, createContactFromSignup,
+  getDealsForContact, createDeal, updateDeal, deleteDeal,
+  getTasks, getTasksForContact, createTask, completeTask, updateTask, deleteTask,
 } from "./db";
 import { sendBetaSignupNotification, sendBetaSignupConfirmation, sendWelcomeEmail } from "./email";
 import { supabaseAdmin } from "./supabase";
@@ -231,6 +233,123 @@ export const appRouter = router({
       .input(z.object({ noteId: z.number().int().positive() }))
       .mutation(async ({ ctx, input }) => {
         await deleteContactNote(ctx.supabase!, input.noteId);
+        return { success: true };
+      }),
+  }),
+
+  deals: router({
+    list: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getDealsForContact(ctx.supabase!, input.contactId);
+      }),
+
+    create: orgProcedure
+      .input(z.object({
+        contactId: z.number().int().positive(),
+        title: z.string().min(1).max(200),
+        value: z.number().min(0).optional(),
+        stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional(),
+        probability: z.number().min(0).max(100).optional(),
+        expectedCloseDate: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return createDeal(ctx.supabase!, {
+          org_id: ctx.user.orgId!,
+          contact_id: input.contactId,
+          title: input.title,
+          value: input.value,
+          stage: input.stage,
+          probability: input.probability,
+          expected_close_date: input.expectedCloseDate,
+          notes: input.notes,
+        });
+      }),
+
+    update: orgProcedure
+      .input(z.object({
+        dealId: z.number().int().positive(),
+        title: z.string().min(1).optional(),
+        value: z.number().min(0).optional(),
+        stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional(),
+        probability: z.number().min(0).max(100).optional(),
+        expectedCloseDate: z.string().nullable().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { dealId, expectedCloseDate, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (expectedCloseDate !== undefined) updates.expected_close_date = expectedCloseDate;
+        return updateDeal(ctx.supabase!, dealId, updates);
+      }),
+
+    delete: orgProcedure
+      .input(z.object({ dealId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteDeal(ctx.supabase!, input.dealId);
+        return { success: true };
+      }),
+  }),
+
+  tasks: router({
+    list: orgProcedure.query(async ({ ctx }) => {
+      return getTasks(ctx.supabase!);
+    }),
+
+    listForContact: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getTasksForContact(ctx.supabase!, input.contactId);
+      }),
+
+    create: orgProcedure
+      .input(z.object({
+        title: z.string().min(1).max(200),
+        description: z.string().optional(),
+        contactId: z.number().int().positive().optional(),
+        dueDate: z.string().optional(),
+        priority: z.enum(["low", "medium", "high"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return createTask(ctx.supabase!, {
+          org_id: ctx.user.orgId!,
+          contact_id: input.contactId,
+          assigned_to: ctx.user.id,
+          title: input.title,
+          description: input.description,
+          due_date: input.dueDate,
+          priority: input.priority,
+        });
+      }),
+
+    complete: orgProcedure
+      .input(z.object({ taskId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        return completeTask(ctx.supabase!, input.taskId);
+      }),
+
+    update: orgProcedure
+      .input(z.object({
+        taskId: z.number().int().positive(),
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        dueDate: z.string().nullable().optional(),
+        priority: z.enum(["low", "medium", "high"]).optional(),
+        status: z.enum(["pending", "completed", "cancelled"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { taskId, dueDate, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (dueDate !== undefined) updates.due_date = dueDate;
+        if (rest.status === "completed") updates.completed_at = new Date().toISOString();
+        return updateTask(ctx.supabase!, taskId, updates);
+      }),
+
+    delete: orgProcedure
+      .input(z.object({ taskId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteTask(ctx.supabase!, input.taskId);
         return { success: true };
       }),
   }),
