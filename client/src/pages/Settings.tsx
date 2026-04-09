@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { CrmLayout, useCrmOrg } from "@/components/CrmLayout";
-import { Building2, Users, Mail, Save, Trash2 } from "lucide-react";
+import { Building2, Users, Mail, Save, Trash2, UserCircle } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
 import type { Organization, OrgMember } from "@shared/types";
 
 const inputClass = "w-full px-3 py-2.5 rounded-lg text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary bg-background border border-border";
@@ -248,6 +249,85 @@ function MemberRow({ member, onUpdate }: { member: OrgMember; onUpdate: (data: R
   );
 }
 
+function YourProfileSection({ members }: { members: OrgMember[] }) {
+  const { user } = useAuth();
+  const utils = trpc.useUtils();
+  const updateName = trpc.auth.updateName.useMutation();
+
+  // Find the current user's member record
+  const myMember = members.find((m) => m.user_id === user?.id);
+  const [form, setForm] = useState({
+    firstName: "",
+    lastName: "",
+    phone: "",
+    title: "",
+  });
+  const [initialized, setInitialized] = useState(false);
+
+  // Initialize form when member data loads
+  if (myMember && !initialized) {
+    setForm({
+      firstName: myMember.first_name || "",
+      lastName: myMember.last_name || "",
+      phone: myMember.phone || "",
+      title: myMember.title || "",
+    });
+    setInitialized(true);
+  }
+
+  const updateMember = trpc.org.updateMember.useMutation({
+    onSuccess: () => utils.org.members.invalidate(),
+  });
+
+  const handleSave = () => {
+    if (!myMember) return;
+    updateMember.mutate({ memberId: myMember.id, ...form });
+    // Also update the Supabase auth name
+    const fullName = `${form.firstName} ${form.lastName}`.trim();
+    if (fullName) updateName.mutate({ fullName });
+  };
+
+  return (
+    <div className={sectionClass}>
+      <div className="flex items-center gap-2 mb-5">
+        <UserCircle className="w-5 h-5 text-primary" />
+        <h2 className="text-foreground font-semibold text-lg">Your Profile</h2>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className={labelClass}>First Name</label>
+          <input className={inputClass} value={form.firstName} onChange={(e) => setForm((f) => ({ ...f, firstName: e.target.value }))} placeholder="John" />
+        </div>
+        <div>
+          <label className={labelClass}>Last Name</label>
+          <input className={inputClass} value={form.lastName} onChange={(e) => setForm((f) => ({ ...f, lastName: e.target.value }))} placeholder="Johnson" />
+        </div>
+        <div>
+          <label className={labelClass}>Title / Role</label>
+          <input className={inputClass} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="Owner, Sales Rep, etc." />
+        </div>
+        <div>
+          <label className={labelClass}>Phone</label>
+          <input className={inputClass} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="(555) 123-4567" />
+        </div>
+      </div>
+      <p className="text-muted-foreground text-xs mt-2">
+        Email: {user?.email} (managed by your login account)
+      </p>
+
+      <button
+        onClick={handleSave}
+        disabled={updateMember.isPending}
+        className="mt-4 flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all disabled:opacity-50"
+        style={{ background: "oklch(0.78 0.12 75)", color: "oklch(0.10 0.008 265)" }}>
+        {updateMember.isPending ? <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" /> : <Save className="w-4 h-4" />}
+        Save Profile
+      </button>
+    </div>
+  );
+}
+
 function SettingsContent() {
   const orgQuery = useCrmOrg();
   const membersQuery = trpc.org.members.useQuery(undefined, { enabled: !!orgQuery.data });
@@ -266,6 +346,7 @@ function SettingsContent() {
       </div>
 
       <div className="flex flex-col gap-6">
+        <YourProfileSection members={(membersQuery.data ?? []) as OrgMember[]} />
         <OrgProfileSection org={orgQuery.data as Organization} />
         <EmailSettingsSection org={orgQuery.data as Organization} />
         <TeamSection members={(membersQuery.data ?? []) as OrgMember[]} />
