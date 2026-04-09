@@ -34,15 +34,20 @@ export async function createContext(
       return { req: opts.req, res: opts.res, user: null, supabase: null };
     }
 
-    // Look up org membership
+    // Look up org membership (including member's name)
     const { data: membership } = await supabaseAdmin
       .from("org_members")
-      .select("org_id, role, organizations(id, tier, name)")
+      .select("org_id, role, first_name, last_name, organizations(id, tier, name)")
       .eq("user_id", user.id)
       .limit(1)
       .single();
 
     const org = (membership?.organizations ?? null) as unknown as { id: string; tier: string; name: string } | null;
+
+    // Get the user's name: check org_members first, then Supabase auth metadata
+    const memberName = [membership?.first_name, membership?.last_name].filter(Boolean).join(" ") || null;
+    const authName = user.user_metadata?.full_name || user.user_metadata?.name || null;
+    const fullName = memberName || authName;
 
     const supabase = createRequestClient(token);
 
@@ -52,7 +57,7 @@ export async function createContext(
       user: {
         id: user.id,
         email: user.email ?? "",
-        fullName: user.user_metadata?.full_name || user.user_metadata?.name || null,
+        fullName,
         orgId: membership?.org_id ?? null,
         orgRole: membership?.role ?? null,
         orgTier: org?.tier ?? null,
