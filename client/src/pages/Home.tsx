@@ -20,6 +20,7 @@ import {
   Home as HomeIcon, Wrench, Sun, Wind, Droplets, ShoppingBag,
   Building2, Activity, DollarSign, GitBranch, Award, CreditCard, Bitcoin
 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 // ─── CDN Assets ─────────────────────────────────────────────
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310519663322351516/HKTda8TZGwk5KWdfM3qn3f/e3c-hero-bg-TrzfcPijoqZJCRQexpPczg.webp";
@@ -111,49 +112,53 @@ function Nav() {
     { label: "Join", id: "pricing" },
   ];
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-[oklch(0.11_0.008_265/0.96)] backdrop-blur-md border-b border-white/8" : ""}`}>
+    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? "bg-background/95 backdrop-blur-md border-b border-border" : ""}`}>
       <div className="container flex items-center justify-between h-16">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-sm bg-gradient-to-br from-[oklch(0.78_0.12_75)] to-[oklch(0.62_0.18_250)] flex items-center justify-center shadow-lg">
             <LayoutGrid className="w-4 h-4 text-[oklch(0.10_0.008_265)]" />
           </div>
           <div className="flex flex-col leading-none">
-            <span className="font-display text-base text-white tracking-[0.2em]">GRIDWORKER <span className="text-[oklch(0.78_0.12_75)]">OS</span></span>
-            <span className="font-mono-brand text-[9px] text-[oklch(0.50_0.01_265)] tracking-widest uppercase">by E3C Collective</span>
+            <span className="font-display text-base text-foreground tracking-[0.2em]">GRIDWORKER <span className="text-[oklch(0.78_0.12_75)]">OS</span></span>
+            <span className="font-mono-brand text-[9px] text-muted-foreground tracking-widest uppercase">by E3C Collective</span>
           </div>
         </div>
         <div className="hidden md:flex items-center gap-8">
           {links.map(l => (
             <a key={l.id} href={`#${l.id}`}
-              className="text-sm text-[oklch(0.65_0.01_265)] hover:text-[oklch(0.78_0.12_75)] transition-colors font-medium tracking-wide">
+              className="text-sm text-muted-foreground hover:text-[oklch(0.78_0.12_75)] transition-colors font-medium tracking-wide">
               {l.label}
             </a>
           ))}
         </div>
         <div className="hidden md:flex items-center gap-3">
+          <ThemeToggle />
           <Link href="/login"
-            className="text-sm text-[oklch(0.78_0.12_75)] hover:text-white transition-colors font-semibold tracking-wide">
+            className="text-sm text-[oklch(0.78_0.12_75)] hover:text-foreground transition-colors font-semibold tracking-wide">
             Sign In
           </Link>
           <Link href="/join"
-            className="btn-gold px-5 py-2 rounded-md text-sm">
+            className="btn-gold px-5 py-2 rounded-md text-sm text-primary-foreground">
             Join Beta
           </Link>
         </div>
-        <button className="md:hidden text-white" onClick={() => setOpen(!open)}>
-          <Menu className="w-6 h-6" />
-        </button>
+        <div className="flex items-center gap-4 md:hidden">
+          <ThemeToggle />
+          <button className="text-foreground" onClick={() => setOpen(!open)}>
+            <Menu className="w-6 h-6" />
+          </button>
+        </div>
       </div>
       {open && (
-        <div className="md:hidden bg-[oklch(0.13_0.009_265)] border-t border-white/8 px-4 py-4 flex flex-col gap-4">
+        <div className="md:hidden bg-background border-t border-border px-4 py-4 flex flex-col gap-4">
           {links.map(l => (
             <a key={l.id} href={`#${l.id}`} onClick={() => setOpen(false)}
-              className="text-sm text-[oklch(0.65_0.01_265)] hover:text-[oklch(0.78_0.12_75)] transition-colors font-medium">
+              className="text-sm text-muted-foreground hover:text-[oklch(0.78_0.12_75)] transition-colors font-medium">
               {l.label}
             </a>
           ))}
           <Link href="/join" onClick={() => setOpen(false)}
-            className="btn-gold px-5 py-2 rounded-md text-sm w-full text-center block">
+            className="btn-gold px-5 py-2 rounded-md text-sm w-full text-center block text-primary-foreground">
             Join Beta
           </Link>
         </div>
@@ -230,7 +235,7 @@ function Hero() {
 // ─── Grid Expansion Visual ──────────────────────────────────
 function GridExpansion() {
   return (
-    <section className="py-20 relative overflow-hidden bg-[oklch(0.11_0.008_265)]">
+    <section className="py-20 relative overflow-hidden bg-background">
       <div className="absolute inset-0 opacity-5"
         style={{ backgroundImage: "radial-gradient(circle at 50% 50%, oklch(0.78 0.12 75), transparent 60%)" }} />
       <div className="container">
@@ -282,7 +287,7 @@ function HowItWorks() {
     { num: "04", icon: Zap, title: "Get Paid to Connect", desc: "When a referral converts — whether it's a Kangen water machine, a roofing job, or any service — the income flows back through the chain to you." },
   ];
   return (
-    <section id="how-it-works" className="py-24 bg-[oklch(0.13_0.009_265)]">
+    <section id="how-it-works" className="py-24 bg-surface">
       <div className="container">
         <AnimSection>
           <div className="text-center mb-16">
@@ -419,7 +424,7 @@ function Features() {
   };
 
   return (
-    <section id="features" className="py-24 bg-[oklch(0.13_0.009_265)]">
+    <section id="features" className="py-24 bg-surface">
       <div className="container">
         <AnimSection>
           <div className="text-center mb-16">
@@ -466,7 +471,7 @@ function WhoItsFor() {
     { icon: ShoppingBag, title: "1099 Entrepreneurs", desc: "Whatever you sell, whatever you do — if your income depends on relationships, GridWorker OS is your operating system." },
   ];
   return (
-    <section id="whos-it-for" className="py-24 bg-[oklch(0.11_0.008_265)]">
+    <section id="whos-it-for" className="py-24 bg-background">
       <div className="container">
         <AnimSection>
           <div className="text-center mb-16">
@@ -573,7 +578,7 @@ function Pricing() {
   ];
 
   return (
-    <section id="pricing" className="py-24 bg-[oklch(0.13_0.009_265)]">
+    <section id="pricing" className="py-24 bg-surface">
       <div className="container">
         <AnimSection>
           <div className="text-center mb-12">

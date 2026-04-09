@@ -2,7 +2,11 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router, protectedProcedure, orgProcedure } from "./_core/trpc";
-import { insertBetaSignup, getBetaSignups, addContactNote, getNotesForSignup, deleteContactNote, createOrganization, addOrgMember } from "./db";
+import {
+  insertBetaSignup, getBetaSignups, addContactNote, getNotesForContact, deleteContactNote,
+  createOrganization, addOrgMember, getContacts, getContact, createContact, updateContact,
+  updateContactStage, deleteContact, createContactFromSignup,
+} from "./db";
 import { sendBetaSignupNotification, sendBetaSignupConfirmation, sendWelcomeEmail } from "./email";
 import { supabaseAdmin } from "./supabase";
 import { chatWithOpenClaw } from "./openclaw";
@@ -73,6 +77,14 @@ export const appRouter = router({
             referral_code: input.referralCode ?? null,
             message: input.message ?? null,
           });
+          // Auto-create contact from signup
+          await createContactFromSignup(ctx.supabase, orgId, {
+            name: input.name,
+            email: input.email,
+            phone: input.phone,
+            industry: input.industry,
+            referralCode: input.referralCode,
+          }).catch((err) => console.error("[Contact] Auto-create failed:", err));
         } else {
           // Anonymous submission — insert via admin client without org scoping
           await supabaseAdmin.from("beta_signups").insert({
@@ -107,24 +119,108 @@ export const appRouter = router({
     }),
   }),
 
+  contacts: router({
+    list: orgProcedure.query(async ({ ctx }) => {
+      return getContacts(ctx.supabase!);
+    }),
+
+    get: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getContact(ctx.supabase!, input.contactId);
+      }),
+
+    create: orgProcedure
+      .input(z.object({
+        firstName: z.string().min(1),
+        lastName: z.string().optional(),
+        email: z.string().email(),
+        phone: z.string().optional(),
+        company: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        zip: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        source: z.enum(["manual", "referral", "import", "website"]).optional(),
+        stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return createContact(ctx.supabase!, {
+          org_id: ctx.user.orgId!,
+          first_name: input.firstName,
+          last_name: input.lastName,
+          email: input.email,
+          phone: input.phone,
+          company: input.company,
+          address: input.address,
+          city: input.city,
+          state: input.state,
+          zip: input.zip,
+          tags: input.tags,
+          source: input.source,
+          stage: input.stage,
+        });
+      }),
+
+    update: orgProcedure
+      .input(z.object({
+        contactId: z.number().int().positive(),
+        firstName: z.string().min(1).optional(),
+        lastName: z.string().optional(),
+        email: z.string().email().optional(),
+        phone: z.string().optional(),
+        company: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        zip: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { contactId, firstName, lastName, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (firstName !== undefined) updates.first_name = firstName;
+        if (lastName !== undefined) updates.last_name = lastName;
+        return updateContact(ctx.supabase!, contactId, updates);
+      }),
+
+    updateStage: orgProcedure
+      .input(z.object({
+        contactId: z.number().int().positive(),
+        stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return updateContactStage(ctx.supabase!, input.contactId, input.stage);
+      }),
+
+    delete: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteContact(ctx.supabase!, input.contactId);
+        return { success: true };
+      }),
+  }),
+
   notes: router({
     list: orgProcedure
-      .input(z.object({ signupId: z.number().int().positive() }))
+      .input(z.object({ contactId: z.number().int().positive() }))
       .query(async ({ ctx, input }) => {
-        return getNotesForSignup(ctx.supabase!, input.signupId);
+        return getNotesForContact(ctx.supabase!, input.contactId);
       }),
 
     add: orgProcedure
       .input(
         z.object({
-          signupId: z.number().int().positive(),
+          contactId: z.number().int().positive(),
           note: z.string().min(1).max(2000),
         })
       )
       .mutation(async ({ ctx, input }) => {
         await addContactNote(ctx.supabase!, {
           orgId: ctx.user.orgId!,
-          signupId: input.signupId,
+          contactId: input.contactId,
           userId: ctx.user.id,
           note: input.note,
         });
