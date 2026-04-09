@@ -10,6 +10,7 @@ import CRM from "@/pages/CRM";
 import Pipeline from "@/pages/Pipeline";
 import Tasks from "@/pages/Tasks";
 import Dashboard from "@/pages/Dashboard";
+import Settings from "@/pages/Settings";
 import Login from "@/pages/Login";
 
 function Router() {
@@ -21,6 +22,7 @@ function Router() {
       <Route path={"/crm/pipeline"} component={Pipeline} />
       <Route path={"/crm/tasks"} component={Tasks} />
       <Route path={"/crm/dashboard"} component={Dashboard} />
+      <Route path={"/crm/settings"} component={Settings} />
       <Route path={"/crm"} component={CRM} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

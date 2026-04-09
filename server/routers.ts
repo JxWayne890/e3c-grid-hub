@@ -9,6 +9,10 @@ import {
   getDealsForContact, createDeal, updateDeal, deleteDeal,
   getTasks, getTasksForContact, createTask, completeTask, updateTask, deleteTask,
   logActivity, getActivitiesForContact,
+  updateOrgProfile, updateMemberProfile, getOrgMembers,
+  getEmailTemplates, createEmailTemplate, deleteEmailTemplate,
+  logEmail, getEmailLogsForContact,
+  getEvents, getEventsForContact, createEvent, updateEvent, deleteEvent,
 } from "./db";
 import { sendBetaSignupNotification, sendBetaSignupConfirmation, sendWelcomeEmail } from "./email";
 import { supabaseAdmin } from "./supabase";
@@ -416,12 +420,129 @@ export const appRouter = router({
     }),
 
     members: orgProcedure.query(async ({ ctx }) => {
-      const { data } = await ctx.supabase!
-        .from("org_members")
-        .select("*")
-        .eq("org_id", ctx.user.orgId!);
-      return data ?? [];
+      return getOrgMembers(ctx.supabase!);
     }),
+
+    updateProfile: orgProcedure
+      .input(z.object({
+        name: z.string().min(1).optional(),
+        industry: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().optional(),
+        website: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        zip: z.string().optional(),
+        timezone: z.string().optional(),
+        emailFromName: z.string().optional(),
+        emailReplyTo: z.string().optional(),
+        emailSignature: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { emailFromName, emailReplyTo, emailSignature, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (emailFromName !== undefined) updates.email_from_name = emailFromName;
+        if (emailReplyTo !== undefined) updates.email_reply_to = emailReplyTo;
+        if (emailSignature !== undefined) updates.email_signature = emailSignature;
+        return updateOrgProfile(ctx.supabase!, ctx.user.orgId!, updates);
+      }),
+
+    updateMember: orgProcedure
+      .input(z.object({
+        memberId: z.string(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        phone: z.string().optional(),
+        title: z.string().optional(),
+        role: z.enum(["owner", "admin", "member"]).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { memberId, firstName, lastName, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (firstName !== undefined) updates.first_name = firstName;
+        if (lastName !== undefined) updates.last_name = lastName;
+        return updateMemberProfile(ctx.supabase!, memberId, updates);
+      }),
+  }),
+
+  emailTemplates: router({
+    list: orgProcedure.query(async ({ ctx }) => {
+      return getEmailTemplates(ctx.supabase!);
+    }),
+    create: orgProcedure
+      .input(z.object({ name: z.string().min(1), subject: z.string().min(1), body: z.string().min(1) }))
+      .mutation(async ({ ctx, input }) => {
+        return createEmailTemplate(ctx.supabase!, { org_id: ctx.user.orgId!, created_by: ctx.user.id, ...input });
+      }),
+    delete: orgProcedure
+      .input(z.object({ templateId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteEmailTemplate(ctx.supabase!, input.templateId);
+        return { success: true };
+      }),
+  }),
+
+  emailLogs: router({
+    listForContact: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getEmailLogsForContact(ctx.supabase!, input.contactId);
+      }),
+  }),
+
+  calendar: router({
+    list: orgProcedure.query(async ({ ctx }) => {
+      return getEvents(ctx.supabase!);
+    }),
+    listForContact: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getEventsForContact(ctx.supabase!, input.contactId);
+      }),
+    create: orgProcedure
+      .input(z.object({
+        title: z.string().min(1),
+        description: z.string().optional(),
+        contactId: z.number().int().positive().optional(),
+        startAt: z.string(),
+        endAt: z.string(),
+        location: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return createEvent(ctx.supabase!, {
+          org_id: ctx.user.orgId!,
+          created_by: ctx.user.id,
+          contact_id: input.contactId,
+          title: input.title,
+          description: input.description,
+          start_at: input.startAt,
+          end_at: input.endAt,
+          location: input.location,
+        });
+      }),
+    update: orgProcedure
+      .input(z.object({
+        eventId: z.number().int().positive(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        startAt: z.string().optional(),
+        endAt: z.string().optional(),
+        location: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const { eventId, startAt, endAt, ...rest } = input;
+        const updates: Record<string, unknown> = { ...rest };
+        if (startAt !== undefined) updates.start_at = startAt;
+        if (endAt !== undefined) updates.end_at = endAt;
+        return updateEvent(ctx.supabase!, eventId, updates);
+      }),
+    delete: orgProcedure
+      .input(z.object({ eventId: z.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteEvent(ctx.supabase!, input.eventId);
+        return { success: true };
+      }),
   }),
 
   ai: router({

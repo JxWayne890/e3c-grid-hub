@@ -1,13 +1,14 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Link, useLocation } from "wouter";
-import { LayoutGrid, LogOut, Shield, Building2, Users, Kanban, CheckSquare, BarChart3 } from "lucide-react";
+import { LayoutGrid, LogOut, Shield, Building2, Users, Kanban, CheckSquare, BarChart3, Settings } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/crm", label: "Contacts", icon: Users },
   { href: "/crm/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/crm/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/crm/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/crm/settings", label: "Settings", icon: Settings },
 ];
 
 function OnboardingFlow() {

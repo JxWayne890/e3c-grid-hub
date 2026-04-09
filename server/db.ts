@@ -396,3 +396,151 @@ export async function deleteContactNote(
 
   if (error) throw new Error(`Failed to delete note: ${error.message}`);
 }
+
+// --- Org profile operations ---
+
+export async function updateOrgProfile(supabase: SupabaseClient, orgId: string, data: Record<string, unknown>) {
+  const { data: org, error } = await supabase
+    .from("organizations")
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq("id", orgId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to update org: ${error.message}`);
+  return org;
+}
+
+export async function updateMemberProfile(supabase: SupabaseClient, memberId: string, data: Record<string, unknown>) {
+  const { data: member, error } = await supabase
+    .from("org_members")
+    .update(data)
+    .eq("id", memberId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to update member: ${error.message}`);
+  return member;
+}
+
+export async function getOrgMembers(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("org_members")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`Failed to fetch members: ${error.message}`);
+  return data ?? [];
+}
+
+// --- Email template operations ---
+
+export async function getEmailTemplates(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("email_templates")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch templates: ${error.message}`);
+  return data ?? [];
+}
+
+export async function createEmailTemplate(supabase: SupabaseClient, data: { org_id: string; name: string; subject: string; body: string; created_by: string }) {
+  const { data: template, error } = await supabase
+    .from("email_templates")
+    .insert(data)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create template: ${error.message}`);
+  return template;
+}
+
+export async function deleteEmailTemplate(supabase: SupabaseClient, templateId: number) {
+  const { error } = await supabase.from("email_templates").delete().eq("id", templateId);
+  if (error) throw new Error(`Failed to delete template: ${error.message}`);
+}
+
+// --- Email log operations ---
+
+export async function logEmail(supabase: SupabaseClient, data: {
+  org_id: string; contact_id?: number; user_id: string; to_email: string;
+  subject: string; body: string; status: string; resend_id?: string;
+}) {
+  const { error } = await supabase.from("email_logs").insert({
+    org_id: data.org_id,
+    contact_id: data.contact_id || null,
+    user_id: data.user_id,
+    to_email: data.to_email,
+    subject: data.subject,
+    body: data.body,
+    status: data.status,
+    resend_id: data.resend_id || null,
+  });
+  if (error) throw new Error(`Failed to log email: ${error.message}`);
+}
+
+export async function getEmailLogsForContact(supabase: SupabaseClient, contactId: number) {
+  const { data, error } = await supabase
+    .from("email_logs")
+    .select("*")
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Failed to fetch email logs: ${error.message}`);
+  return data ?? [];
+}
+
+// --- Calendar event operations ---
+
+export async function getEvents(supabase: SupabaseClient) {
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .gte("end_at", new Date().toISOString())
+    .order("start_at", { ascending: true });
+  if (error) throw new Error(`Failed to fetch events: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getEventsForContact(supabase: SupabaseClient, contactId: number) {
+  const { data, error } = await supabase
+    .from("events")
+    .select("*")
+    .eq("contact_id", contactId)
+    .order("start_at", { ascending: true });
+  if (error) throw new Error(`Failed to fetch events: ${error.message}`);
+  return data ?? [];
+}
+
+export async function createEvent(supabase: SupabaseClient, data: {
+  org_id: string; contact_id?: number; created_by: string; title: string;
+  description?: string; start_at: string; end_at: string; location?: string;
+}) {
+  const { data: event, error } = await supabase
+    .from("events")
+    .insert({
+      org_id: data.org_id,
+      contact_id: data.contact_id || null,
+      created_by: data.created_by,
+      title: data.title,
+      description: data.description || "",
+      start_at: data.start_at,
+      end_at: data.end_at,
+      location: data.location || "",
+    })
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to create event: ${error.message}`);
+  return event;
+}
+
+export async function updateEvent(supabase: SupabaseClient, eventId: number, data: Record<string, unknown>) {
+  const { data: event, error } = await supabase
+    .from("events")
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq("id", eventId)
+    .select()
+    .single();
+  if (error) throw new Error(`Failed to update event: ${error.message}`);
+  return event;
+}
+
+export async function deleteEvent(supabase: SupabaseClient, eventId: number) {
+  const { error } = await supabase.from("events").delete().eq("id", eventId);
+  if (error) throw new Error(`Failed to delete event: ${error.message}`);
+}
