@@ -9,6 +9,7 @@ import JoinBeta from "@/pages/JoinBeta";
 import CRM from "@/pages/CRM";
 import Pipeline from "@/pages/Pipeline";
 import Tasks from "@/pages/Tasks";
+import Dashboard from "@/pages/Dashboard";
 import Login from "@/pages/Login";
 
 function Router() {
@@ -19,6 +20,7 @@ function Router() {
       <Route path={"/login"} component={Login} />
       <Route path={"/crm/pipeline"} component={Pipeline} />
       <Route path={"/crm/tasks"} component={Tasks} />
+      <Route path={"/crm/dashboard"} component={Dashboard} />
       <Route path={"/crm"} component={CRM} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

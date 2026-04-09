@@ -328,6 +328,33 @@ export async function deleteTask(supabase: SupabaseClient, taskId: number) {
   if (error) throw new Error(`Failed to delete task: ${error.message}`);
 }
 
+// --- Activity operations ---
+
+export async function logActivity(
+  supabase: SupabaseClient,
+  data: { org_id: string; contact_id: number; user_id: string; type: string; content: string; metadata?: Record<string, unknown> }
+) {
+  await supabase.from("activities").insert({
+    org_id: data.org_id,
+    contact_id: data.contact_id,
+    user_id: data.user_id,
+    type: data.type,
+    content: data.content,
+    metadata: data.metadata ?? {},
+  });
+}
+
+export async function getActivitiesForContact(supabase: SupabaseClient, contactId: number) {
+  const { data, error } = await supabase
+    .from("activities")
+    .select("*")
+    .eq("contact_id", contactId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(`Failed to fetch activities: ${error.message}`);
+  return data ?? [];
+}
+
 // --- Contact note operations ---
 
 export async function addContactNote(

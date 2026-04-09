@@ -95,6 +95,19 @@ export type Task = {
   completed_at: string | null;
 };
 
+export type ActivityType = "note" | "email" | "call" | "task" | "stage_change" | "deal_created";
+
+export type Activity = {
+  id: number;
+  org_id: string;
+  contact_id: number;
+  user_id: string;
+  type: ActivityType;
+  content: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
 export type Conversation = {
   id: string;
   org_id: string;

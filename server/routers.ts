@@ -8,6 +8,7 @@ import {
   updateContactStage, deleteContact, createContactFromSignup,
   getDealsForContact, createDeal, updateDeal, deleteDeal,
   getTasks, getTasksForContact, createTask, completeTask, updateTask, deleteTask,
+  logActivity, getActivitiesForContact,
 } from "./db";
 import { sendBetaSignupNotification, sendBetaSignupConfirmation, sendWelcomeEmail } from "./email";
 import { supabaseAdmin } from "./supabase";
@@ -194,7 +195,16 @@ export const appRouter = router({
         stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]),
       }))
       .mutation(async ({ ctx, input }) => {
-        return updateContactStage(ctx.supabase!, input.contactId, input.stage);
+        const result = await updateContactStage(ctx.supabase!, input.contactId, input.stage);
+        // Log activity (non-blocking)
+        Promise.allSettled([
+          logActivity(ctx.supabase!, {
+            org_id: ctx.user.orgId!, contact_id: input.contactId, user_id: ctx.user.id,
+            type: "stage_change", content: `Stage changed to ${input.stage}`,
+            metadata: { newStage: input.stage },
+          }),
+        ]);
+        return result;
       }),
 
     delete: orgProcedure
@@ -226,6 +236,13 @@ export const appRouter = router({
           userId: ctx.user.id,
           note: input.note,
         });
+        // Log activity (non-blocking)
+        Promise.allSettled([
+          logActivity(ctx.supabase!, {
+            org_id: ctx.user.orgId!, contact_id: input.contactId, user_id: ctx.user.id,
+            type: "note", content: input.note,
+          }),
+        ]);
         return { success: true };
       }),
 
@@ -351,6 +368,14 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         await deleteTask(ctx.supabase!, input.taskId);
         return { success: true };
+      }),
+  }),
+
+  activities: router({
+    listForContact: orgProcedure
+      .input(z.object({ contactId: z.number().int().positive() }))
+      .query(async ({ ctx, input }) => {
+        return getActivitiesForContact(ctx.supabase!, input.contactId);
       }),
   }),
 
