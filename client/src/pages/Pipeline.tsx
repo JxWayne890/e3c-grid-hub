@@ -1,9 +1,8 @@
-import { useState, useRef } from "react";
-import { motion } from "framer-motion";
+import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { CrmLayout, useCrmOrg } from "@/components/CrmLayout";
 import type { Contact, ContactStage } from "@shared/types";
-import { User, Building2, Clock, GripVertical } from "lucide-react";
+import { Building2, Clock, GripVertical } from "lucide-react";
 
 const STAGES: { value: ContactStage; label: string; color: string }[] = [
   { value: "lead", label: "Lead", color: "oklch(0.65 0.18 250)" },
@@ -29,13 +28,10 @@ function KanbanCard({
   const days = daysInStage(contact.updated_at);
 
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
+    <div
       draggable
       onDragStart={(e) => onDragStart(e as unknown as React.DragEvent, contact)}
-      className="rounded-lg p-3 cursor-grab active:cursor-grabbing transition-shadow hover:shadow-lg group bg-surface border border-border"
+      className="block shrink-0 rounded-lg p-3 cursor-grab active:cursor-grabbing transition-shadow hover:shadow-md group bg-surface border border-border"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -64,7 +60,7 @@ function KanbanCard({
           {days}d
         </span>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -89,14 +85,14 @@ function KanbanColumn({
 
   return (
     <div
-      className={`flex flex-col rounded-xl min-h-[400px] transition-all ${isOver ? "ring-2 ring-primary/50" : ""}`}
-      style={{ background: "oklch(0.13 0.008 265)", border: `1px solid ${isOver ? stage.color : "oklch(0.22 0.009 265)"}` }}
+      className={`flex flex-col rounded-xl min-h-[400px] transition-all bg-surface/40 backdrop-blur-sm ${isOver ? "ring-2 ring-primary/50 bg-surface/70" : ""}`}
+      style={{ border: `1px solid ${isOver ? stage.color : "oklch(0.5 0.01 265 / 15%)"}` }}
       onDragOver={(e) => { e.preventDefault(); onDragOver(e, stage.value); }}
       onDragLeave={onDragLeave}
       onDrop={(e) => onDrop(e, stage.value)}
     >
       {/* Column header */}
-      <div className="px-4 py-3 flex items-center justify-between border-b border-border">
+      <div className="px-4 py-3 flex items-center justify-between border-b border-border/60">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full" style={{ background: stage.color }} />
           <span className="text-foreground text-xs font-semibold uppercase tracking-widest">

@@ -11,7 +11,9 @@
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "seed:ra": "tsx scripts/seed-restore-america.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

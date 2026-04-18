@@ -13,12 +13,15 @@ import {
   Users, Zap, TrendingUp, Mail, Phone, Calendar,
   LayoutGrid, Search, Download, RefreshCw, ChevronRight,
   Building2, MessageSquare, Link2, Shield, LogOut,
-  StickyNote, Trash2, Send, Sparkles, X, QrCode, Copy, Check, Filter
+  StickyNote, Trash2, Send, Sparkles, X, QrCode, Copy, Check, Filter,
+  DollarSign, ArrowRight, CheckSquare, Plus, Clock
 } from "lucide-react";
 import { Link } from "wouter";
 import { AIChatBox } from "@/components/AIChatBox";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ContactForm, type ContactFormData } from "@/components/ContactForm";
+import { CrmLayout } from "@/components/CrmLayout";
+import { PageHeader, StatCard as UIStatCard, GhostButton } from "@/components/ui/page";
 import type { Contact, ContactStage } from "@shared/types";
 
 const STAGE_COLORS: Record<ContactStage, { bg: string; text: string }> = {
@@ -74,7 +77,7 @@ function ContactRow({ contact, onClick, selected }: {
   return (
     <motion.tr variants={fadeUp}
       onClick={onClick}
-      className={`cursor-pointer transition-colors border-b border-border ${selected ? "bg-primary/10" : ""}`}>
+      className={`cursor-pointer transition-colors border-b border-white/[0.04] last:border-b-0 hover:bg-white/[0.02] ${selected ? "bg-primary/10" : ""}`}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-[oklch(0.10_0.008_265)]"
@@ -208,6 +211,299 @@ function NotesSection({ contactId }: { contactId: number }) {
   );
 }
 
+function relativeTime(date: string) {
+  const diff = Date.now() - new Date(date).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days}d ago`;
+  return formatDate(date);
+}
+
+const ACTIVITY_ICONS: Record<string, React.ElementType> = {
+  note: StickyNote,
+  email: Mail,
+  call: Phone,
+  task: CheckSquare,
+  event: Calendar,
+  sms: MessageSquare,
+  deal: DollarSign,
+  stage_change: ArrowRight,
+  deal_created: DollarSign,
+};
+
+function ActivityTimeline({ contactId }: { contactId: number }) {
+  const { data: entries, isLoading } = trpc.timeline.forContact.useQuery({ contactId });
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Clock className="w-3.5 h-3.5 text-primary" />
+        <span className="text-muted-foreground text-xs uppercase tracking-widest">Activity Timeline</span>
+      </div>
+      {isLoading ? (
+        <div className="py-3 flex justify-center">
+          <div className="w-4 h-4 rounded-full border border-primary border-t-transparent animate-spin" />
+        </div>
+      ) : !entries || entries.length === 0 ? (
+        <p className="text-muted-foreground text-xs text-center py-3">No activity yet</p>
+      ) : (
+        <div className="flex flex-col gap-1.5 max-h-64 overflow-y-auto">
+          {entries.slice(0, 30).map((a: any) => {
+            const Icon = ACTIVITY_ICONS[a.kind] || Zap;
+            return (
+              <div key={a.id} className="flex items-start gap-2.5 py-1.5">
+                <div className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5"
+                  style={{ background: "oklch(0.78 0.12 75 / 10%)" }}>
+                  <Icon className="w-3 h-3 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-foreground text-xs font-medium truncate">{a.title}</p>
+                  {a.preview && <p className="text-muted-foreground text-[11px] truncate">{a.preview}</p>}
+                  <p className="text-muted-foreground text-[10px]">{relativeTime(a.timestamp)}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DealsSection({ contactId }: { contactId: number }) {
+  const [showForm, setShowForm] = useState(false);
+  const [title, setTitle] = useState("");
+  const [value, setValue] = useState("");
+  const [probability, setProbability] = useState("50");
+  const [closeDate, setCloseDate] = useState("");
+  const utils = trpc.useUtils();
+
+  const { data: deals, isLoading } = trpc.deals.list.useQuery({ contactId });
+
+  const createDealMut = trpc.deals.create.useMutation({
+    onSuccess: () => {
+      utils.deals.list.invalidate({ contactId });
+      setShowForm(false);
+      setTitle(""); setValue(""); setProbability("50"); setCloseDate("");
+    },
+  });
+
+  const deleteDealMut = trpc.deals.delete.useMutation({
+    onSuccess: () => utils.deals.list.invalidate({ contactId }),
+  });
+
+  const handleCreate = () => {
+    if (!title.trim()) return;
+    createDealMut.mutate({
+      contactId,
+      title: title.trim(),
+      value: parseFloat(value) || 0,
+      probability: parseInt(probability) || 50,
+      expectedCloseDate: closeDate || undefined,
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <DollarSign className="w-3.5 h-3.5 text-primary" />
+        <span className="text-muted-foreground text-xs uppercase tracking-widest">Deals</span>
+        {deals && deals.length > 0 && (
+          <span className="ml-auto px-1.5 py-0.5 rounded text-xs bg-primary/15 text-primary">
+            {deals.length}
+          </span>
+        )}
+        <button onClick={() => setShowForm(!showForm)}
+          className="ml-auto text-primary hover:text-foreground transition-colors">
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="rounded-lg p-3 flex flex-col gap-2 bg-background border border-border">
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Deal title"
+            className="w-full px-2.5 py-1.5 rounded text-sm text-foreground placeholder:text-muted-foreground outline-none bg-surface border border-border" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Value ($)" type="number"
+              className="px-2.5 py-1.5 rounded text-sm text-foreground placeholder:text-muted-foreground outline-none bg-surface border border-border" />
+            <input value={probability} onChange={(e) => setProbability(e.target.value)} placeholder="Probability %" type="number" min="0" max="100"
+              className="px-2.5 py-1.5 rounded text-sm text-foreground placeholder:text-muted-foreground outline-none bg-surface border border-border" />
+          </div>
+          <input value={closeDate} onChange={(e) => setCloseDate(e.target.value)} type="date"
+            className="px-2.5 py-1.5 rounded text-sm text-foreground outline-none bg-surface border border-border" />
+          <button onClick={handleCreate} disabled={createDealMut.isPending || !title.trim()}
+            className="py-1.5 rounded text-xs font-semibold disabled:opacity-40"
+            style={{ background: "oklch(0.78 0.12 75)", color: "oklch(0.10 0.008 265)" }}>
+            {createDealMut.isPending ? "Creating..." : "Add Deal"}
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+        {isLoading ? (
+          <div className="py-3 flex justify-center">
+            <div className="w-4 h-4 rounded-full border border-primary border-t-transparent animate-spin" />
+          </div>
+        ) : !deals || deals.length === 0 ? (
+          <p className="text-muted-foreground text-xs text-center py-2">No deals yet</p>
+        ) : (
+          deals.map((deal: any) => (
+            <div key={deal.id} className="rounded-lg p-2.5 group relative bg-background border border-border">
+              <div className="flex items-center justify-between">
+                <span className="text-foreground text-sm font-medium truncate">{deal.title}</span>
+                <span className="text-primary text-sm font-bold">${Number(deal.value).toLocaleString()}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-muted-foreground text-[10px] capitalize">{deal.stage}</span>
+                <span className="text-muted-foreground text-[10px]">{deal.probability}% likely</span>
+                {deal.expected_close_date && (
+                  <span className="text-muted-foreground text-[10px]">Close: {new Date(deal.expected_close_date).toLocaleDateString()}</span>
+                )}
+              </div>
+              <button onClick={() => deleteDealMut.mutate({ dealId: deal.id })}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-500/20">
+                <Trash2 className="w-3 h-3 text-red-400" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmailSection({ contactId, contactEmail }: { contactId: number; contactEmail: string }) {
+  const [showCompose, setShowCompose] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+  const utils = trpc.useUtils();
+
+  const { data: emailLogs, isLoading } = trpc.emailLogs.listForContact.useQuery({ contactId });
+
+  const sendEmailMut = trpc.emails.send.useMutation({
+    onSuccess: () => {
+      utils.emailLogs.listForContact.invalidate({ contactId });
+      setShowCompose(false);
+      setSubject(""); setBody("");
+    },
+  });
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Mail className="w-3.5 h-3.5 text-primary" />
+        <span className="text-muted-foreground text-xs uppercase tracking-widest">Emails</span>
+        <button onClick={() => setShowCompose(!showCompose)}
+          className="ml-auto text-xs text-primary hover:text-foreground transition-colors">
+          {showCompose ? "Cancel" : "Compose"}
+        </button>
+      </div>
+
+      {showCompose && (
+        <div className="rounded-lg p-3 flex flex-col gap-2 bg-background border border-border">
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
+            className="w-full px-2.5 py-1.5 rounded text-sm text-foreground placeholder:text-muted-foreground outline-none bg-surface border border-border" />
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Email body..." rows={6}
+            className="w-full px-2.5 py-1.5 rounded text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none bg-surface border border-border" />
+          <button onClick={() => sendEmailMut.mutate({ contactId, toEmail: contactEmail, subject, body })}
+            disabled={sendEmailMut.isPending || !subject.trim() || !body.trim()}
+            className="py-1.5 rounded text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"
+            style={{ background: "oklch(0.78 0.12 75)", color: "oklch(0.10 0.008 265)" }}>
+            {sendEmailMut.isPending ? "Sending..." : <><Send className="w-3 h-3" /> Send Email</>}
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+        {isLoading ? (
+          <div className="py-3 flex justify-center">
+            <div className="w-4 h-4 rounded-full border border-primary border-t-transparent animate-spin" />
+          </div>
+        ) : !emailLogs || emailLogs.length === 0 ? (
+          <p className="text-muted-foreground text-xs text-center py-2">No emails sent yet</p>
+        ) : (
+          emailLogs.map((log: any) => (
+            <div key={log.id} className="rounded-lg p-2.5 bg-background border border-border">
+              <div className="flex items-center justify-between">
+                <span className="text-foreground text-xs font-medium truncate">{log.subject}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${log.status === "sent" ? "bg-green-500/15 text-green-400" : "bg-red-500/15 text-red-400"}`}>
+                  {log.status}
+                </span>
+              </div>
+              <p className="text-muted-foreground text-[10px] mt-1 truncate">{log.body?.slice(0, 80)}</p>
+              <p className="text-muted-foreground text-[10px] mt-0.5">{relativeTime(log.created_at)}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SmsThread({ contactId }: { contactId: number }) {
+  const utils = trpc.useUtils();
+  const { data: thread } = trpc.sms.thread.useQuery({ contactId }, { refetchInterval: 3000 });
+  const sendMut = trpc.sms.send.useMutation({
+    onSuccess: () => utils.sms.thread.invalidate({ contactId }),
+  });
+  const [body, setBody] = useState("");
+
+  const onSend = () => {
+    if (!body.trim()) return;
+    sendMut.mutate({ contactId, body: body.trim() });
+    setBody("");
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="w-3.5 h-3.5 text-primary" />
+        <span className="text-muted-foreground text-xs uppercase tracking-widest">Messages</span>
+      </div>
+      <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
+        {!thread || thread.length === 0 ? (
+          <p className="text-muted-foreground text-xs text-center py-2">No messages yet.</p>
+        ) : (
+          thread.map((m: any) => {
+            const outbound = m.direction === "outbound";
+            return (
+              <div key={m.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[75%] rounded-2xl px-3 py-1.5 text-xs ${
+                  outbound ? "text-white rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"
+                }`} style={outbound ? { background: "oklch(0.45 0.18 250)" } : undefined}>
+                  <p className="leading-relaxed">{m.body}</p>
+                  <p className="text-[9px] opacity-60 mt-0.5">
+                    {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {outbound && ` · ${m.status}`}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div className="flex items-center gap-2 mt-1">
+        <input value={body} onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onSend()}
+          maxLength={320}
+          placeholder="Type a message..."
+          className="flex-1 px-2.5 py-1.5 rounded text-xs text-foreground outline-none bg-background border border-border" />
+        <span className="text-muted-foreground text-[10px] tabular-nums">{body.length}/320</span>
+        <button onClick={onSend} disabled={!body.trim() || sendMut.isPending}
+          className="px-2.5 py-1.5 rounded text-xs font-semibold disabled:opacity-40"
+          style={{ background: "oklch(0.78 0.12 75)", color: "oklch(0.10 0.008 265)" }}>
+          <Send className="w-3 h-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DetailPanel({ contact, onClose, onEdit }: { contact: Contact; onClose: () => void; onEdit: () => void }) {
   const fullName = `${contact.first_name} ${contact.last_name}`.trim();
   const stageColor = STAGE_COLORS[contact.stage];
@@ -299,18 +595,35 @@ function DetailPanel({ contact, onClose, onEdit }: { contact: Contact; onClose: 
         </div>
       </div>
 
+      {/* Activity Timeline */}
+      <div className="pt-1 border-t border-border">
+        <ActivityTimeline contactId={contact.id} />
+      </div>
+
       {/* Notes Section */}
       <div className="pt-1 border-t border-border">
         <NotesSection contactId={contact.id} />
       </div>
 
+      {/* Deals Section */}
+      <div className="pt-1 border-t border-border">
+        <DealsSection contactId={contact.id} />
+      </div>
+
+      {/* Email Section */}
+      <div className="pt-1 border-t border-border">
+        <EmailSection contactId={contact.id} contactEmail={contact.email} />
+      </div>
+
+      {/* SMS Thread */}
+      {contact.phone && (
+        <div className="pt-1 border-t border-border">
+          <SmsThread contactId={contact.id} />
+        </div>
+      )}
+
       {/* Actions */}
       <div className="flex flex-col gap-2">
-        <a href={`mailto:${contact.email}`}
-          className="w-full py-2.5 rounded-lg text-sm font-semibold text-center transition-all"
-          style={{ background: "oklch(0.78 0.12 75)", color: "oklch(0.10 0.008 265)" }}>
-          Send Email
-        </a>
         {contact.phone && (
           <a href={`sms:${contact.phone}`}
             className="w-full py-2.5 rounded-lg text-sm font-semibold text-center transition-all"
@@ -456,9 +769,10 @@ export default function CRM() {
     onSuccess: (data) => {
       setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
       if (data.conversationId) setConversationId(data.conversationId);
-      // Refresh all CRM data — AI may have created/updated contacts, tasks, deals, notes
+      // Refresh all CRM data — AI may have created/updated contacts, tasks, deals, notes, events
       utils.contacts.list.invalidate();
       utils.tasks.list.invalidate();
+      utils.calendar.list.invalidate();
     },
   });
 
@@ -536,86 +850,36 @@ export default function CRM() {
   }, {});
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-sm bg-gradient-to-br from-[oklch(0.78_0.12_75)] to-[oklch(0.62_0.18_250)] flex items-center justify-center">
-              <LayoutGrid className="w-3.5 h-3.5 text-[oklch(0.10_0.008_265)]" />
-            </div>
-            <span className="font-display text-sm text-foreground tracking-[0.2em]">
-              GRIDWORKER <span className="text-primary">OS</span>
-            </span>
-            <span className="ml-2 px-2 py-0.5 rounded text-xs font-mono"
-              style={{ background: "oklch(0.78 0.12 75 / 15%)", color: "oklch(0.78 0.12 75)" }}>
-              CRM
-            </span>
-          </Link>
-          <div className="flex items-center gap-4">
-            {/* CRM nav tabs */}
-            <div className="flex items-center gap-1 mr-2">
-              <Link href="/crm" className="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-primary/15 text-primary">Contacts</Link>
-              <Link href="/crm/pipeline" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Pipeline</Link>
-              <Link href="/crm/tasks" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Tasks</Link>
-              <Link href="/crm/dashboard" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Dashboard</Link>
-              <Link href="/crm/settings" className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/5">Settings</Link>
-            </div>
-            <ThemeToggle />
-            {/* QR Code toggle */}
-            <button
-              onClick={() => { setQrOpen(!qrOpen); setChatOpen(false); setSelected(null); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                background: qrOpen ? "oklch(0.62 0.18 250)" : "oklch(0.62 0.18 250 / 15%)",
-                color: qrOpen ? "#fff" : "oklch(0.62 0.18 250)",
-              }}>
-              <QrCode className="w-3.5 h-3.5" />
-              QR
-            </button>
-            {/* AI Chat toggle */}
-            {orgTier !== "starter" && (
-              <button
-                onClick={() => { setChatOpen(!chatOpen); setQrOpen(false); setSelected(null); }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                style={{
-                  background: chatOpen ? "oklch(0.78 0.12 75)" : "oklch(0.78 0.12 75 / 15%)",
-                  color: chatOpen ? "oklch(0.10 0.008 265)" : "oklch(0.78 0.12 75)",
-                }}>
-                <Sparkles className="w-3.5 h-3.5" />
-                AI
-              </button>
-            )}
-            <span className="text-muted-foreground text-sm hidden sm:block">{user?.email}</span>
-            <button onClick={() => signOut()}
-              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm">
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:block">Sign Out</span>
-            </button>
-          </div>
+    <CrmLayout>
+      <div className="w-full pb-16">
+        <PageHeader
+          eyebrow="Customer Database"
+          eyebrowIcon={Users}
+          title="Contacts"
+          subtitle={`${orgQuery.data?.name} — contact management & pipeline`}
+          actions={
+            <>
+              <ThemeToggle />
+              <GhostButton icon={QrCode} active={qrOpen}
+                onClick={() => { setQrOpen(!qrOpen); setChatOpen(false); setSelected(null); }}>
+                QR
+              </GhostButton>
+              {orgTier !== "starter" && (
+                <GhostButton icon={Sparkles} active={chatOpen}
+                  onClick={() => { setChatOpen(!chatOpen); setQrOpen(false); setSelected(null); }}>
+                  AI
+                </GhostButton>
+              )}
+            </>
+          }
+        />
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+          <UIStatCard icon={Users} label="Total Contacts" value={totalContacts} sub="All time" />
+          <UIStatCard icon={Zap} label="Active Leads" value={byStage["lead"] ?? 0} sub="New pipeline" />
+          <UIStatCard icon={Building2} label="In Progress" value={(byStage["contacted"] ?? 0) + (byStage["qualified"] ?? 0) + (byStage["proposal"] ?? 0)} sub="Working deals" />
+          <UIStatCard icon={TrendingUp} label="Won" value={byStage["won"] ?? 0} sub={`${totalContacts ? Math.round((byStage["won"] ?? 0) / totalContacts * 100) : 0}% conversion`} subTone="green" accent />
         </div>
-      </nav>
-
-      <div className="max-w-7xl mx-auto px-6 pt-24 pb-16">
-        {/* Header */}
-        <motion.div initial="hidden" animate="visible" variants={stagger} className="mb-8">
-          <motion.div variants={fadeUp} className="mb-6">
-            <h1 className="font-display text-4xl text-foreground mb-1">
-              GRID <span className="text-primary">CRM</span>
-            </h1>
-            <p className="text-muted-foreground text-sm">
-              {orgQuery.data.name} — Contact Management & Pipeline
-            </p>
-          </motion.div>
-
-          {/* Stats */}
-          <motion.div variants={stagger} className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            <StatCard icon={Users} label="Total Contacts" value={totalContacts} sub="All time" />
-            <StatCard icon={Zap} label="Active Leads" value={byStage["lead"] ?? 0} sub="New pipeline" />
-            <StatCard icon={Building2} label="In Progress" value={(byStage["contacted"] ?? 0) + (byStage["qualified"] ?? 0) + (byStage["proposal"] ?? 0)} sub="Working deals" />
-            <StatCard icon={TrendingUp} label="Won" value={byStage["won"] ?? 0} sub={`${totalContacts ? Math.round((byStage["won"] ?? 0) / totalContacts * 100) : 0}% conversion`} />
-          </motion.div>
-        </motion.div>
 
         {/* Main content */}
         <div className={`grid gap-6 ${selected || chatOpen || qrOpen ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1"}`}>
@@ -630,7 +894,7 @@ export default function CRM() {
                   placeholder="Search by name, email, industry, referral..."
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2.5 rounded-lg text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary bg-background border border-border"
+                  className="w-full pl-9 pr-4 py-2.5 rounded-lg text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/40 bg-surface/60 backdrop-blur-sm border border-white/10 transition-colors"
                 />
               </div>
               {myReferralCode && (
@@ -675,14 +939,14 @@ export default function CRM() {
             </div>
 
             {/* Table */}
-            <div className="rounded-xl overflow-hidden border border-border bg-surface">
+            <div className="rounded-xl overflow-hidden bg-surface/60 backdrop-blur-sm border border-white/5">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-muted border-b border-border">
-                    <th className="px-4 py-3 text-left text-muted-foreground text-xs uppercase tracking-widest font-medium">Contact</th>
-                    <th className="px-4 py-3 text-left text-muted-foreground text-xs uppercase tracking-widest font-medium hidden md:table-cell">Company</th>
-                    <th className="px-4 py-3 text-left text-muted-foreground text-xs uppercase tracking-widest font-medium hidden lg:table-cell">Stage</th>
-                    <th className="px-4 py-3 text-left text-muted-foreground text-xs uppercase tracking-widest font-medium hidden xl:table-cell">Created</th>
+                  <tr className="border-b border-white/5">
+                    <th className="px-4 py-3 text-left text-muted-foreground text-[11px] font-semibold">Contact</th>
+                    <th className="px-4 py-3 text-left text-muted-foreground text-[11px] font-semibold hidden md:table-cell">Company</th>
+                    <th className="px-4 py-3 text-left text-muted-foreground text-[11px] font-semibold hidden lg:table-cell">Stage</th>
+                    <th className="px-4 py-3 text-left text-muted-foreground text-[11px] font-semibold hidden xl:table-cell">Created</th>
                     <th className="px-4 py-3 w-8"></th>
                   </tr>
                 </thead>
@@ -872,6 +1136,6 @@ export default function CRM() {
           }}
         />
       )}
-    </div>
+    </CrmLayout>
   );
 }
