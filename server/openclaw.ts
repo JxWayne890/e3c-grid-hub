@@ -202,7 +202,7 @@ export async function chatWithOpenClaw(
               type: "req",
               id: "sub-1",
               method: "sessions.messages.subscribe",
-              params: { sessionKey: "default" },
+              params: { key: "default" },
             })
           );
           ws.send(
@@ -314,110 +314,24 @@ CRITICAL: This snapshot is only a quick summary. The user has ${biz.totalSignups
     : "\nNo business data loaded yet — call get_dashboard_stats to retrieve current data.";
 
   const appCapabilities = `
-APP CAPABILITIES — what you can help with:
-1. **QR Code & Referral Link**: The user already has a personal QR code and referral link generated in the app.
-   - Their referral code is: ${biz?.referralCode || "not assigned"}
-   - Their referral link is: ${biz?.referralUrl || "not available"}
-   - When they ask for "my QR code" or "my referral link", give them the link above directly.
-   - Tell them they can click the "QR" button in the top nav of the CRM to view, copy, and download their QR code as a PNG.
-   - The QR code points to the signup form with their referral code pre-filled.
+QR CODE / REFERRAL LINK (no tool needed — use these values directly):
+- Referral code: ${biz?.referralCode || "not assigned"}
+- Referral link: ${biz?.referralUrl || "not available"}
+- The user can click the "QR" button in the CRM nav to view/download their QR code as PNG.
 
-2. **Contact Management**: The CRM dashboard shows all beta signups for their organization.
-   - They can search contacts by name, email, industry, or referral code.
-   - They can click any contact to see details and add interaction notes.
-   - They can export all contacts as CSV using the download button.
-   - They can filter to "My Referrals" to see only contacts attributed to their referral code.
+YOU HAVE MCP TOOLS for the CRM (contacts, deals, tasks, calendar, email, analytics, roofing-specific tools, tags, org profile, etc.). The full tool list with parameter schemas is provided to you separately by the runtime — use them.
 
-3. **Notes**: They can add timestamped interaction notes on any contact (call logs, follow-ups, etc.).
+REQUIRED PARAMETERS for almost every tool:
+- org_id: "${context.orgId}"
+- user_id (when applicable): "${context.userId}"
 
-4. **Email**: When someone signs up through their referral link, the system automatically:
-   - Sends a notification email to the org owner
-   - Sends a confirmation email to the new signup
-
-5. **Organization**: They manage their organization from the CRM. Members can be added with different roles (owner, admin, member).
-
-6. **CRM Tools (you can execute these)**: You have MCP tools connected to the CRM database. USE these tools when the user asks:
-
-   CONTACTS:
-   - **search_contacts**: Search by name/email/company. Pass org_id: "${context.orgId}"
-   - **get_contact**: Get full details by ID.
-   - **create_contact**: Create new contact. Pass org_id: "${context.orgId}"
-   - **update_contact**: Edit any contact field (name, phone, company, address, tags).
-   - **update_contact_stage**: Move contact in pipeline.
-   - **get_contact_timeline**: Get full activity history for a contact.
-
-   NOTES & TASKS:
-   - **add_note**: Add note to contact. Pass org_id: "${context.orgId}", user_id: "${context.userId}"
-   - **create_task**: Create task. Pass org_id: "${context.orgId}", assigned_to: "${context.userId}"
-   - **list_tasks**: List pending tasks. Pass org_id: "${context.orgId}"
-   - **update_task**: Edit task title, due date, priority, status. Pass task_id.
-   - **assign_task**: Reassign task to team member. Pass task_id, assigned_to (user_id).
-
-   DEALS:
-   - **create_deal**: Create deal on contact. Pass org_id: "${context.orgId}"
-   - **list_deals**: List all deals. Pass org_id: "${context.orgId}"
-   - **get_pipeline_summary**: Pipeline stage counts. Pass org_id: "${context.orgId}"
-   - **update_deal**: Edit deal value, stage, close date. Pass deal_id.
-   - **delete_deal**: Remove a deal. Pass deal_id.
-
-   EMAIL:
-   - **send_email**: Send email to a contact. Pass org_id: "${context.orgId}", user_id: "${context.userId}". Uses org's email settings (from name, reply-to, signature).
-
-   EMAIL TEMPLATES:
-   - **list_email_templates**: Get saved templates. Pass org_id: "${context.orgId}"
-   - **create_email_template**: Save new template. Pass org_id: "${context.orgId}", user_id: "${context.userId}"
-
-   CALENDAR:
-   - **create_event**: Schedule meeting/appointment. Pass org_id: "${context.orgId}", created_by: "${context.userId}"
-   - **list_events**: List upcoming events. Pass org_id: "${context.orgId}"
-   - **update_event**: Reschedule/edit event. Pass event_id.
-   - **delete_event**: Cancel event. Pass event_id.
-
-   ANALYTICS:
-   - **get_dashboard_stats**: Full CRM analytics (contacts by stage, deal values, task counts, events). Pass org_id: "${context.orgId}"
-   - **get_activity_feed**: Recent activity across all contacts. Pass org_id: "${context.orgId}"
-
-   TAGS:
-   - **add_tag**: Tag a contact. Pass contact_id, tag.
-   - **remove_tag**: Remove tag from contact. Pass contact_id, tag.
-
-   ORGANIZATION:
-   - **get_org_profile**: Get full business profile and team members. Pass org_id: "${context.orgId}"
-
-   ROOFING (only present if the org is a roofing company):
-   - **list_storm_events**: Storm events (hail/wind/tropical/ice) + lead & job counts per storm. Pass org_id: "${context.orgId}"
-   - **get_leads_by_storm_event**: Leads tagged to a storm. Pass org_id + either storm_event_id or storm_name (fuzzy).
-   - **list_adjusters**: Insurance adjusters with carrier, territory, avg approval days, avg supplement %. Pass org_id: "${context.orgId}"
-   - **get_adjuster_stats**: Rank adjusters by avg_supplement_pct / avg_approval_days / approved_value / supplement_value. Pass org_id + rank_by.
-   - **list_jobs**: Roofing jobs, filter by status/state/crew_id/storm_event_id. Pass org_id: "${context.orgId}"
-   - **get_job_details**: Full job + adjuster + crew + rep + PM. Pass job_id OR (customer_name + org_id) for fuzzy lookup.
-   - **get_contact_full_context**: Contact + jobs + calls + sms + tasks + notes in one payload. Pass contact_id.
-   - **get_pipeline_stuck_leads**: Leads stuck in a stage > N days (default: insurance_pending > 14d). Pass org_id: "${context.orgId}"
-   - **get_supplement_performance**: Supplement recovery by coordinator or adjuster. Pass org_id + group_by.
-   - **get_crew_utilization**: Crew utilization over next N days. Pass org_id + days_ahead.
-   - **get_referral_network**: Referral graph. Pass org_id: "${context.orgId}"
-   - **list_calls_by_disposition**: Calls filtered by disposition + call_type + days_back. Pass org_id: "${context.orgId}"
-   - **get_top_adjusters_by_approved_value**: Top adjusters by approved $. Pass org_id: "${context.orgId}"
-   - **get_top_rep_closed_this_month**: Top sales reps by closed contract $ this calendar month. Pass org_id: "${context.orgId}"
-   - **get_at_risk_customers**: Customers with health score < threshold (default 70). Pass org_id: "${context.orgId}"
-
-   IMPORTANT: Always pass org_id "${context.orgId}" and user_id "${context.userId}" when tools require them.
-
-RESPONSE GUIDELINES — MANDATORY TOOL-FIRST WORKFLOW:
-- The CRM has REAL data. NEVER answer "you have no contacts/deals/tasks" without first calling a tool to verify.
-- For ANY question about specific records, counts, or analytics → call the relevant tool FIRST, then answer based on what it returned.
-- "Summarize my contacts" → call get_dashboard_stats AND search_contacts (broad query) → summarize based on the response
-- "Show me leads" / "what's in my pipeline" → call get_pipeline_summary OR list_deals
-- "Any tasks today?" → call list_tasks
-- "Find John Smith" → call search_contacts with query="John Smith"
-- "What's on my calendar?" → call list_events
-- "Send an email to X" → call send_email (it's a real tool — DO it, don't describe it)
-- "Schedule a meeting" → call create_event (ask for date/time first if missing)
-- "Tag contact X as Y" → call add_tag
-- For QR code or referral link → use the link/code provided in the snapshot above (no tool needed)
-- After every tool call, give a concise human-friendly summary of the result with specific numbers and names.
-- If a tool returns an error, say so plainly — don't pretend it worked.
-- If the user asks for something genuinely outside available tools, be honest and say it's not available yet.`;
+WORKFLOW RULES:
+1. The CRM has real data — NEVER claim "you have no X" without first calling a tool to verify.
+2. For ANY question about specific records, counts, or analytics → call the relevant tool first, then answer.
+3. For action requests (send email, create task, schedule event, tag contact, etc.) → call the tool and DO it. Don't describe how.
+4. After a tool call, give a concise summary with specific numbers/names from the result.
+5. If a tool returns an error, say so plainly — don't fake success.
+6. Keep replies short and actionable.`;
 
   return `You are the AI assistant for "${context.orgName}".
 You are speaking with ${context.userName}.
