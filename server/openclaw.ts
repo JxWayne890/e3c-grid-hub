@@ -236,16 +236,24 @@ export async function chatWithOpenClaw(
           if (typeof delta === "string") {
             fullText = msg.payload?.data?.text || fullText + delta;
           }
-          // Check for lifecycle end
-          if (msg.payload?.data?.phase === "end") {
+          const phase = msg.payload?.data?.phase;
+          if (phase === "end") {
             finish(fullText);
+          } else if (phase === "error") {
+            const err = msg.payload?.data?.error;
+            const errMsg =
+              (typeof err === "string" ? err : err?.message) ||
+              msg.payload?.data?.message ||
+              "The AI agent returned an error.";
+            fail(errMsg);
           }
           return;
         }
 
         // Step 5: Final chat event with complete message
         if (msg.type === "event" && msg.event === "chat") {
-          if (msg.payload?.state === "final") {
+          const state = msg.payload?.state;
+          if (state === "final") {
             const content = msg.payload?.message?.content;
             if (Array.isArray(content)) {
               const text = content
@@ -254,6 +262,13 @@ export async function chatWithOpenClaw(
                 .join("");
               if (text) finish(text);
             }
+          } else if (state === "error") {
+            const errMsg =
+              msg.payload?.errorMessage ||
+              msg.payload?.error?.message ||
+              msg.payload?.error ||
+              "The AI assistant returned an error.";
+            fail(typeof errMsg === "string" ? errMsg : "The AI assistant returned an error.");
           }
           return;
         }
