@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { Link, useLocation } from "wouter";
 import { NotificationsBell } from "./NotificationsBell";
 import { GlobalSearchTrigger } from "./GlobalSearch";
+import { FloatingAIChat } from "./FloatingAIChat";
 import { createContext, useContext } from "react";
 import {
   LayoutGrid, LogOut, Shield, Building2, Users, UserPlus, Kanban, CheckSquare, BarChart3,
@@ -319,6 +320,8 @@ export function CrmLayout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+
+      <FloatingAIChat />
     </div>
     </CrmLayoutMountedContext.Provider>
   );

@@ -17,7 +17,6 @@ import {
   DollarSign, ArrowRight, CheckSquare, Plus, Clock
 } from "lucide-react";
 import { Link } from "wouter";
-import { AIChatBox } from "@/components/AIChatBox";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { ContactForm, type ContactFormData } from "@/components/ContactForm";
 import { CrmLayout } from "@/components/CrmLayout";
@@ -725,14 +724,11 @@ export default function CRM() {
   const { user, loading: authLoading, isAuthenticated, signOut } = useAuth();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Contact | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [showMyReferrals, setShowMyReferrals] = useState(false);
   const [copied, setCopied] = useState(false);
   const [contactFormOpen, setContactFormOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | undefined>();
-  const [chatMessages, setChatMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>();
 
   const utils = trpc.useUtils();
 
@@ -764,23 +760,6 @@ export default function CRM() {
   const qrQuery = trpc.qr.getMyCode.useQuery(undefined, {
     enabled: isAuthenticated && !!orgQuery.data,
   });
-
-  const chatMutation = trpc.ai.chat.useMutation({
-    onSuccess: (data) => {
-      setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
-      if (data.conversationId) setConversationId(data.conversationId);
-      // Refresh all CRM data — AI may have created/updated contacts, tasks, deals, notes, events
-      utils.contacts.list.invalidate();
-      utils.tasks.list.invalidate();
-      utils.calendar.list.invalidate();
-    },
-  });
-
-  const handleSendMessage = (content: string) => {
-    const newMessages = [...chatMessages, { role: "user" as const, content }];
-    setChatMessages(newMessages);
-    chatMutation.mutate({ messages: newMessages, conversationId });
-  };
 
   // Auth gate
   if (authLoading) {
@@ -861,15 +840,9 @@ export default function CRM() {
             <>
               <ThemeToggle />
               <GhostButton icon={QrCode} active={qrOpen}
-                onClick={() => { setQrOpen(!qrOpen); setChatOpen(false); setSelected(null); }}>
+                onClick={() => { setQrOpen(!qrOpen); setSelected(null); }}>
                 QR
               </GhostButton>
-              {orgTier !== "starter" && (
-                <GhostButton icon={Sparkles} active={chatOpen}
-                  onClick={() => { setChatOpen(!chatOpen); setQrOpen(false); setSelected(null); }}>
-                  AI
-                </GhostButton>
-              )}
             </>
           }
         />
@@ -882,9 +855,9 @@ export default function CRM() {
         </div>
 
         {/* Main content */}
-        <div className={`grid gap-6 ${selected || chatOpen || qrOpen ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1"}`}>
+        <div className={`grid gap-6 ${selected || qrOpen ? "grid-cols-1 lg:grid-cols-3" : "grid-cols-1"}`}>
           {/* Table */}
-          <div className={selected || chatOpen || qrOpen ? "lg:col-span-2" : ""}>
+          <div className={selected || qrOpen ? "lg:col-span-2" : ""}>
             {/* Toolbar */}
             <div className="flex items-center gap-3 mb-4">
               <div className="flex-1 relative">
@@ -987,7 +960,7 @@ export default function CRM() {
           </div>
 
           {/* Side panels */}
-          {selected && !chatOpen && !qrOpen && (
+          {selected && !qrOpen && (
             <div>
               <DetailPanel
                 contact={selected}
@@ -1072,52 +1045,6 @@ export default function CRM() {
             </div>
           )}
 
-          {chatOpen && (
-            <div className="rounded-xl overflow-hidden flex flex-col h-[600px] sticky top-24 bg-surface"
-              style={{ border: "1px solid oklch(0.78 0.12 75 / 25%)" }}>
-              <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid oklch(0.22 0.009 265)" }}>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-foreground" />
-                  <span className="text-foreground text-sm font-semibold">AI Assistant</span>
-                  <span className="px-1.5 py-0.5 rounded text-xs"
-                    style={{ background: "oklch(0.78 0.12 75 / 15%)", color: "oklch(0.78 0.12 75)" }}>
-                    {orgTier}
-                  </span>
-                </div>
-                <button onClick={() => setChatOpen(false)}
-                  className="text-muted-foreground hover:text-foreground transition-colors">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              {orgTier === "starter" ? (
-                <div className="flex-1 flex items-center justify-center p-6 text-center">
-                  <div>
-                    <Sparkles className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                    <p className="text-foreground font-semibold mb-1">Upgrade to Pro</p>
-                    <p className="text-muted-foreground text-sm">
-                      AI features require a Pro or Enterprise plan.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 overflow-hidden">
-                  <AIChatBox
-                    messages={chatMessages}
-                    onSendMessage={handleSendMessage}
-                    isLoading={chatMutation.isPending}
-                    placeholder="Ask about your contacts, trends, or actions..."
-                    height="100%"
-                    emptyStateMessage="Ask me about your business data, contacts, or marketing strategy."
-                    suggestedPrompts={[
-                      "Summarize my contacts",
-                      "Which industries are most common?",
-                      "Draft a follow-up email for new contacts",
-                    ]}
-                  />
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
