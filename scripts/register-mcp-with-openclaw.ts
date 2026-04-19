@@ -82,10 +82,12 @@ ws.on("message", (data: WebSocket.Data) => {
     console.log("Registering MCP server...");
 
     const configPatch = {
-      mcpServers: {
-        crm: {
-          url: MCP_URL,
-          transport: "streamable-http",
+      mcp: {
+        servers: {
+          crm: {
+            url: MCP_URL,
+            transport: "streamable-http",
+          },
         },
       },
     };

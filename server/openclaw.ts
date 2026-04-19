@@ -301,17 +301,17 @@ function buildSystemPrompt(context: OpenClawContext): string {
   const biz = context.business;
   const businessData = biz
     ? `
-CURRENT BUSINESS DATA FOR "${context.orgName}":
-- Total signups/contacts: ${biz.totalSignups}
+CURRENT BUSINESS DATA SNAPSHOT FOR "${context.orgName}":
+- Total contacts in CRM: ${biz.totalSignups}
 - Total interaction notes: ${biz.totalNotes}
-- Top industries: ${biz.topIndustries.length > 0 ? biz.topIndustries.join(", ") : "none yet"}
+- Top companies/industries seen: ${biz.topIndustries.length > 0 ? biz.topIndustries.join(", ") : "none yet"}
 - User's referral code: ${biz.referralCode || "not assigned"}
 - User's referral link: ${biz.referralUrl || "not available"}
-- Recent signups (last 10):
-${biz.recentSignups.length > 0 ? biz.recentSignups.map((s) => `  * ${s.name} (${s.email}) — ${s.industry}, signed up ${s.created_at}`).join("\n") : "  (none yet)"}
+- 10 most recent contacts (preview only — DO NOT treat this as the full list):
+${biz.recentSignups.length > 0 ? biz.recentSignups.map((s) => `  * ${s.name} (${s.email}) — ${s.industry}, created ${s.created_at}`).join("\n") : "  (none yet)"}
 
-When the user asks about their dashboard, contacts, signups, industries, or referrals, use this REAL data above. Do NOT make up numbers or placeholder data.`
-    : "\nNo business data loaded yet.";
+CRITICAL: This snapshot is only a quick summary. The user has ${biz.totalSignups} total contacts. For ANY specific question about contacts, deals, tasks, pipeline, calendar, or analytics, you MUST call the appropriate MCP tool (search_contacts, get_dashboard_stats, list_tasks, list_deals, etc.) to get accurate live data. NEVER claim there are no contacts, deals, or tasks — always verify with a tool call first.`
+    : "\nNo business data loaded yet — call get_dashboard_stats to retrieve current data.";
 
   const appCapabilities = `
 APP CAPABILITIES — what you can help with:
@@ -403,17 +403,21 @@ APP CAPABILITIES — what you can help with:
 
    IMPORTANT: Always pass org_id "${context.orgId}" and user_id "${context.userId}" when tools require them.
 
-RESPONSE GUIDELINES:
-- When asked for a QR code or referral link, provide the ACTUAL link from the data above.
-- When asked about contacts, pipeline, tasks, deals, or events — USE the tools to get real data.
-- When asked to CREATE, UPDATE, or SEND anything — USE the MCP tools. Don't just explain how — DO it.
-- When asked to send an email — USE the send_email tool. Compose the email based on context and send it.
-- When asked to schedule or reschedule something — USE create_event or update_event. Ask for date/time if not provided.
-- When asked about analytics or stats — USE get_dashboard_stats.
-- When asked to tag contacts — USE add_tag or remove_tag.
-- When asked to use a template — USE list_email_templates to find it, then send_email with the template content.
-- After taking an action with a tool, confirm what you did with specific details.
-- If they ask you to do something the app cannot do yet, be honest and say it's not available yet.`;
+RESPONSE GUIDELINES — MANDATORY TOOL-FIRST WORKFLOW:
+- The CRM has REAL data. NEVER answer "you have no contacts/deals/tasks" without first calling a tool to verify.
+- For ANY question about specific records, counts, or analytics → call the relevant tool FIRST, then answer based on what it returned.
+- "Summarize my contacts" → call get_dashboard_stats AND search_contacts (broad query) → summarize based on the response
+- "Show me leads" / "what's in my pipeline" → call get_pipeline_summary OR list_deals
+- "Any tasks today?" → call list_tasks
+- "Find John Smith" → call search_contacts with query="John Smith"
+- "What's on my calendar?" → call list_events
+- "Send an email to X" → call send_email (it's a real tool — DO it, don't describe it)
+- "Schedule a meeting" → call create_event (ask for date/time first if missing)
+- "Tag contact X as Y" → call add_tag
+- For QR code or referral link → use the link/code provided in the snapshot above (no tool needed)
+- After every tool call, give a concise human-friendly summary of the result with specific numbers and names.
+- If a tool returns an error, say so plainly — don't pretend it worked.
+- If the user asks for something genuinely outside available tools, be honest and say it's not available yet.`;
 
   return `You are the AI assistant for "${context.orgName}".
 You are speaking with ${context.userName}.

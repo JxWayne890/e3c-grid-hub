@@ -1373,18 +1373,31 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
-        // Fetch live business data for context
-        const [signupsRes, notesRes, memberRes] = await Promise.all([
-          ctx.supabase!.from("beta_signups").select("name, email, industry, created_at").order("created_at", { ascending: false }).limit(10),
+        // Fetch live business data for context — query the contacts table (real CRM data)
+        const [contactsRes, notesRes, memberRes] = await Promise.all([
+          ctx.supabase!.from("contacts")
+            .select("first_name, last_name, email, company, stage, created_at")
+            .eq("org_id", ctx.user.orgId!)
+            .order("created_at", { ascending: false })
+            .limit(10),
           ctx.supabase!.from("contact_notes").select("id", { count: "exact", head: true }),
           ctx.supabase!.from("org_members").select("referral_code").eq("user_id", ctx.user.id).eq("org_id", ctx.user.orgId!).single(),
         ]);
 
-        const signups = signupsRes.data ?? [];
-        const industries = Array.from(new Set(signups.map((s: any) => s.industry).filter(Boolean)));
+        const contacts = contactsRes.data ?? [];
+        const recentSignups = contacts.map((c: any) => ({
+          name: `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim(),
+          email: c.email,
+          industry: c.company || c.stage || "—",
+          created_at: c.created_at,
+        }));
+        const industries = Array.from(new Set(contacts.map((c: any) => c.company).filter(Boolean)));
 
-        // Get total count separately
-        const { count: totalSignups } = await ctx.supabase!.from("beta_signups").select("id", { count: "exact", head: true });
+        // Get total contact count for this org
+        const { count: totalSignups } = await ctx.supabase!
+          .from("contacts")
+          .select("id", { count: "exact", head: true })
+          .eq("org_id", ctx.user.orgId!);
 
         const reply = await chatWithOpenClaw(input.messages, {
           orgId: ctx.user.orgId!,
@@ -1394,7 +1407,7 @@ export const appRouter = router({
           userName: ctx.user.fullName || ctx.user.email,
           business: {
             totalSignups: totalSignups ?? 0,
-            recentSignups: signups as any[],
+            recentSignups: recentSignups as any[],
             topIndustries: industries as string[],
             referralCode: memberRes.data?.referral_code ?? null,
             referralUrl: memberRes.data?.referral_code
