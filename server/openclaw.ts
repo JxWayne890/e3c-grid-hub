@@ -2,6 +2,7 @@ import { ENV } from "./_core/env";
 import { TRPCError } from "@trpc/server";
 import crypto from "crypto";
 import WebSocket from "ws";
+import { mintContextToken } from "./mcp/context";
 
 export type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -127,7 +128,12 @@ export async function chatWithOpenClaw(
     });
   }
 
-  const systemPrompt = buildSystemPrompt(context);
+  // Mint a short-lived (5 min) HMAC-signed context token. The LLM is told to
+  // pass this back as mcp_context_token on every tool call. The MCP wrapper
+  // verifies it server-side and ignores any LLM-supplied org_id, so prompt
+  // injection cannot escape the user's tenant.
+  const contextToken = mintContextToken(context.orgId, context.userId);
+  const systemPrompt = buildSystemPrompt(context, contextToken);
 
   // Build the user message with system context prepended
   const lastUserMsg = messages.filter((m) => m.role === "user").pop();
@@ -292,7 +298,7 @@ export async function chatWithOpenClaw(
   });
 }
 
-function buildSystemPrompt(context: OpenClawContext): string {
+function buildSystemPrompt(context: OpenClawContext, contextToken: string): string {
   const tierInstructions =
     context.orgTier === "pro"
       ? "You are in READ-ONLY mode. You can answer questions about the business data but cannot create, update, or delete any records."
@@ -322,8 +328,9 @@ QR CODE / REFERRAL LINK (no tool needed — use these values directly):
 YOU HAVE MCP TOOLS for the CRM (contacts, deals, tasks, calendar, email, analytics, roofing-specific tools, tags, org profile, etc.). The full tool list with parameter schemas is provided to you separately by the runtime — use them.
 
 REQUIRED PARAMETERS for almost every tool:
-- org_id: "${context.orgId}"
-- user_id (when applicable): "${context.userId}"
+- mcp_context_token: "${contextToken}"  ← REQUIRED on EVERY tool call. Pass this exact string. Never modify it. Never invent a different value. The server rejects calls without it.
+- org_id: "${context.orgId}"  ← For your reasoning. The server ignores whatever you send and uses the verified org from the context token.
+- user_id (when applicable): "${context.userId}"  ← Same — pass it for clarity, but the server uses the verified user from the context token.
 
 WORKFLOW RULES:
 1. The CRM has real data — NEVER claim "you have no X" without first calling a tool to verify.

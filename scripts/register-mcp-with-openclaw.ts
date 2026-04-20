@@ -13,7 +13,13 @@ const TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN!;
 const OPENCLAW_URL = process.env.OPENCLAW_URL!;
 const PRIV_PEM = (process.env.OPENCLAW_DEVICE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
 const DEVICE_ID = process.env.OPENCLAW_DEVICE_ID!;
+const MCP_SHARED_SECRET = process.env.MCP_SHARED_SECRET!;
 const API_URL = process.env.APP_URL || "http://localhost:3000";
+
+if (!MCP_SHARED_SECRET || MCP_SHARED_SECRET.length < 32) {
+  console.error("MCP_SHARED_SECRET missing or too short (min 32 chars). Generate with: openssl rand -hex 32");
+  process.exit(1);
+}
 
 // The MCP server URL that OpenClaw will connect to
 // Must be reachable from the OpenClaw Docker container — use the public API URL
@@ -87,6 +93,12 @@ ws.on("message", (data: WebSocket.Data) => {
           crm: {
             url: MCP_URL,
             transport: "streamable-http",
+            // Shared secret sent on every MCP request. Without this header,
+            // the API server returns 401. Rotate by regenerating the secret
+            // in both the API .env and this config.
+            headers: {
+              "x-mcp-secret": MCP_SHARED_SECRET,
+            },
           },
         },
       },

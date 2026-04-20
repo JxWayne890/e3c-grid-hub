@@ -13,15 +13,23 @@
  * - get_pipeline_summary: Get pipeline stage counts
  */
 
+import crypto from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import type { Express, Request, Response } from "express";
-import { supabaseAdmin } from "./supabase";
+import { ENV } from "./_core/env";
+import { tool } from "./mcp/wrapper";
+import { getCtx } from "./mcp/context";
 import { simulateEmailSend, simulateSmsBlast, simulateSingleSms } from "./lib/simulate";
 
-// We use supabaseAdmin for MCP calls because OpenClaw doesn't have a user session.
-// Tool calls are scoped by org_id which OpenClaw passes as a parameter.
+// Each tool call runs through the tool() wrapper in ./mcp/wrapper, which:
+//   - Verifies the mcp_context_token (HMAC) and rejects unauthenticated calls.
+//   - Builds a per-call ctx with org_id, user_id, and a Supabase client scoped
+//     to a freshly-minted user JWT — so RLS enforces org isolation even if the
+//     LLM passes a wrong org_id.
+//   - Writes audit rows to agent_actions.
+// Tool handlers access the per-call client via getCtx().db.
 
 function createMcpServer() {
   const server = new McpServer({
@@ -30,7 +38,7 @@ function createMcpServer() {
   });
 
   // --- TOOL: search_contacts ---
-  server.tool(
+  tool(server,
     "search_contacts",
     "Search contacts in the CRM by name, email, or company. Returns up to 10 matches.",
     {
@@ -38,7 +46,7 @@ function createMcpServer() {
       query: z.string().describe("Search term to match against name, email, or company"),
     },
     async ({ org_id, query }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("contacts")
         .select("id, first_name, last_name, email, phone, company, stage, created_at")
         .eq("org_id", org_id)
@@ -52,14 +60,14 @@ function createMcpServer() {
   );
 
   // --- TOOL: get_contact ---
-  server.tool(
+  tool(server,
     "get_contact",
     "Get full details of a specific contact by their ID, including all fields.",
     {
       contact_id: z.number().describe("The contact ID"),
     },
     async ({ contact_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("contacts")
         .select("*")
         .eq("id", contact_id)
@@ -71,7 +79,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: create_contact ---
-  server.tool(
+  tool(server,
     "create_contact",
     "Create a new contact in the CRM. Returns the created contact.",
     {
@@ -84,7 +92,7 @@ function createMcpServer() {
       stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional().describe("Pipeline stage (default: lead)"),
     },
     async ({ org_id, first_name, last_name, email, phone, company, stage }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("contacts")
         .insert({
           org_id,
@@ -105,7 +113,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: update_contact_stage ---
-  server.tool(
+  tool(server,
     "update_contact_stage",
     "Move a contact to a different pipeline stage (lead, contacted, qualified, proposal, won, lost).",
     {
@@ -113,7 +121,7 @@ function createMcpServer() {
       stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).describe("The new stage"),
     },
     async ({ contact_id, stage }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("contacts")
         .update({ stage, updated_at: new Date().toISOString() })
         .eq("id", contact_id)
@@ -126,7 +134,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: add_note ---
-  server.tool(
+  tool(server,
     "add_note",
     "Add an interaction note to a contact's record.",
     {
@@ -136,7 +144,7 @@ function createMcpServer() {
       note: z.string().describe("The note content"),
     },
     async ({ org_id, contact_id, user_id, note }) => {
-      const { error } = await supabaseAdmin
+      const { error } = await getCtx().db
         .from("contact_notes")
         .insert({ org_id, contact_id, user_id, note });
 
@@ -146,7 +154,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: create_task ---
-  server.tool(
+  tool(server,
     "create_task",
     "Create a new task. Can optionally be linked to a contact.",
     {
@@ -159,7 +167,7 @@ function createMcpServer() {
       priority: z.enum(["low", "medium", "high"]).optional().describe("Task priority (default: medium)"),
     },
     async ({ org_id, assigned_to, title, description, contact_id, due_date, priority }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("tasks")
         .insert({
           org_id,
@@ -179,7 +187,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: create_deal ---
-  server.tool(
+  tool(server,
     "create_deal",
     "Create a deal/opportunity linked to a contact with a monetary value.",
     {
@@ -191,7 +199,7 @@ function createMcpServer() {
       expected_close_date: z.string().optional().describe("Expected close date YYYY-MM-DD"),
     },
     async ({ org_id, contact_id, title, value, probability, expected_close_date }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("deals")
         .insert({
           org_id,
@@ -211,7 +219,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: list_tasks ---
-  server.tool(
+  tool(server,
     "list_tasks",
     "List pending tasks for the organization. Shows title, due date, priority, and linked contact.",
     {
@@ -219,7 +227,7 @@ function createMcpServer() {
       status: z.enum(["pending", "completed", "cancelled"]).optional().describe("Filter by status (default: pending)"),
     },
     async ({ org_id, status }) => {
-      const query = supabaseAdmin
+      const query = getCtx().db
         .from("tasks")
         .select("id, title, description, due_date, status, priority, contact_id, assigned_to")
         .eq("org_id", org_id)
@@ -234,14 +242,14 @@ function createMcpServer() {
   );
 
   // --- TOOL: get_pipeline_summary ---
-  server.tool(
+  tool(server,
     "get_pipeline_summary",
     "Get a summary of the sales pipeline showing how many contacts are in each stage.",
     {
       org_id: z.string().describe("The organization ID"),
     },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("contacts")
         .select("stage")
         .eq("org_id", org_id);
@@ -267,7 +275,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: send_email ---
-  server.tool(
+  tool(server,
     "send_email",
     "Send an email to a contact using the organization's email settings. Logs the email to the contact's timeline.",
     {
@@ -280,7 +288,7 @@ function createMcpServer() {
     },
     async ({ org_id, contact_id, user_id, to_email, subject, body }) => {
       // Get org settings for from name and reply-to
-      const { data: org } = await supabaseAdmin.from("organizations").select("name, email_from_name, email_reply_to, email_signature").eq("id", org_id).single();
+      const { data: org } = await getCtx().db.from("organizations").select("name, email_from_name, email_reply_to, email_signature").eq("id", org_id).single();
 
       const fromName = org?.email_from_name || org?.name || "GridWorker OS";
       const replyTo = org?.email_reply_to || undefined;
@@ -304,14 +312,14 @@ function createMcpServer() {
         if (error) return { content: [{ type: "text" as const, text: `Email failed: ${error.message}` }] };
 
         // Log the email
-        await supabaseAdmin.from("email_logs").insert({
+        await getCtx().db.from("email_logs").insert({
           org_id, contact_id: contact_id || null, user_id, to_email, subject, body: fullBody,
           status: "sent", resend_id: emailResult?.id || null,
         });
 
         // Log activity if contact linked
         if (contact_id) {
-          await supabaseAdmin.from("activities").insert({
+          await getCtx().db.from("activities").insert({
             org_id, contact_id, user_id, type: "email",
             content: `Sent email: "${subject}"`, metadata: { to: to_email, subject },
           });
@@ -325,7 +333,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: create_event ---
-  server.tool(
+  tool(server,
     "create_event",
     "Create a calendar event/meeting. Can optionally be linked to a contact.",
     {
@@ -339,7 +347,7 @@ function createMcpServer() {
       location: z.string().optional().describe("Event location"),
     },
     async ({ org_id, created_by, title, description, start_at, end_at, contact_id, location }) => {
-      const { data, error } = await supabaseAdmin.from("events").insert({
+      const { data, error } = await getCtx().db.from("events").insert({
         org_id, created_by, title, description: description || "",
         start_at, end_at, contact_id: contact_id || null, location: location || "",
       }).select().single();
@@ -350,14 +358,14 @@ function createMcpServer() {
   );
 
   // --- TOOL: list_events ---
-  server.tool(
+  tool(server,
     "list_events",
     "List upcoming calendar events for the organization.",
     {
       org_id: z.string().describe("The organization ID"),
     },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("events")
         .select("id, title, start_at, end_at, location, contact_id")
         .eq("org_id", org_id)
@@ -372,7 +380,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: update_contact ---
-  server.tool(
+  tool(server,
     "update_contact",
     "Update any field on an existing contact (name, phone, company, address, tags, etc).",
     {
@@ -396,21 +404,21 @@ function createMcpServer() {
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
 
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("contacts").update(updates).eq("id", contact_id).select("id, first_name, last_name").single();
+      const { data, error } = await getCtx().db.from("contacts").update(updates).eq("id", contact_id).select("id, first_name, last_name").single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Updated contact ${data.first_name} ${data.last_name} (ID: ${data.id})` }] };
     }
   );
 
   // --- TOOL: get_contact_timeline ---
-  server.tool(
+  tool(server,
     "get_contact_timeline",
     "Get the full activity timeline for a contact (notes, emails, stage changes, deals, tasks).",
     {
       contact_id: z.number().describe("The contact ID"),
     },
     async ({ contact_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("activities")
         .select("id, type, content, metadata, created_at")
         .eq("contact_id", contact_id)
@@ -424,7 +432,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: get_org_profile ---
-  server.tool(
+  tool(server,
     "get_org_profile",
     "Get the organization's business profile, team members, and settings.",
     {
@@ -432,8 +440,8 @@ function createMcpServer() {
     },
     async ({ org_id }) => {
       const [orgRes, membersRes] = await Promise.all([
-        supabaseAdmin.from("organizations").select("*").eq("id", org_id).single(),
-        supabaseAdmin.from("org_members").select("first_name, last_name, role, title, phone, referral_code").eq("org_id", org_id),
+        getCtx().db.from("organizations").select("*").eq("id", org_id).single(),
+        getCtx().db.from("org_members").select("first_name, last_name, role, title, phone, referral_code").eq("org_id", org_id),
       ]);
 
       if (orgRes.error) return { content: [{ type: "text" as const, text: `Error: ${orgRes.error.message}` }] };
@@ -447,14 +455,14 @@ function createMcpServer() {
   );
 
   // --- TOOL: list_deals ---
-  server.tool(
+  tool(server,
     "list_deals",
     "List all deals/opportunities for the organization with their values and stages.",
     {
       org_id: z.string().describe("The organization ID"),
     },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("deals")
         .select("id, title, value, stage, probability, expected_close_date, contact_id")
         .eq("org_id", org_id)
@@ -470,7 +478,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: update_task ---
-  server.tool(
+  tool(server,
     "update_task",
     "Update one or more fields on an existing task (title, description, due date, priority, or status).",
     {
@@ -489,14 +497,14 @@ function createMcpServer() {
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
 
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("tasks").update(updates).eq("id", task_id).select().single();
+      const { data, error } = await getCtx().db.from("tasks").update(updates).eq("id", task_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Task updated: "${data.title}" (ID: ${data.id})` }] };
     }
   );
 
   // --- TOOL: assign_task ---
-  server.tool(
+  tool(server,
     "assign_task",
     "Reassign a task to a different user.",
     {
@@ -504,7 +512,7 @@ function createMcpServer() {
       assigned_to: z.string().describe("The user ID to assign the task to"),
     },
     async ({ task_id, assigned_to }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("tasks")
         .update({ assigned_to, updated_at: new Date().toISOString() })
         .eq("id", task_id)
@@ -517,7 +525,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: update_deal ---
-  server.tool(
+  tool(server,
     "update_deal",
     "Update one or more fields on an existing deal (title, value, stage, probability, or expected close date).",
     {
@@ -536,28 +544,28 @@ function createMcpServer() {
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
 
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("deals").update(updates).eq("id", deal_id).select().single();
+      const { data, error } = await getCtx().db.from("deals").update(updates).eq("id", deal_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Deal updated: "${data.title}" (ID: ${data.id})` }] };
     }
   );
 
   // --- TOOL: delete_deal ---
-  server.tool(
+  tool(server,
     "delete_deal",
     "Permanently delete a deal/opportunity by its ID.",
     {
       deal_id: z.number().describe("The ID of the deal to delete"),
     },
     async ({ deal_id }) => {
-      const { error } = await supabaseAdmin.from("deals").delete().eq("id", deal_id);
+      const { error } = await getCtx().db.from("deals").delete().eq("id", deal_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Deal ${deal_id} deleted.` }] };
     }
   );
 
   // --- TOOL: update_event ---
-  server.tool(
+  tool(server,
     "update_event",
     "Update one or more fields on an existing calendar event (title, description, times, or location).",
     {
@@ -576,35 +584,35 @@ function createMcpServer() {
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
 
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("events").update(updates).eq("id", event_id).select().single();
+      const { data, error } = await getCtx().db.from("events").update(updates).eq("id", event_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Event updated: "${data.title}" (ID: ${data.id})` }] };
     }
   );
 
   // --- TOOL: delete_event ---
-  server.tool(
+  tool(server,
     "delete_event",
     "Permanently delete a calendar event by its ID.",
     {
       event_id: z.number().describe("The ID of the event to delete"),
     },
     async ({ event_id }) => {
-      const { error } = await supabaseAdmin.from("events").delete().eq("id", event_id);
+      const { error } = await getCtx().db.from("events").delete().eq("id", event_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Event ${event_id} deleted.` }] };
     }
   );
 
   // --- TOOL: list_email_templates ---
-  server.tool(
+  tool(server,
     "list_email_templates",
     "List available email templates for the organization.",
     {
       org_id: z.string().describe("The organization ID"),
     },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("email_templates")
         .select("id, name, subject, body")
         .eq("org_id", org_id)
@@ -618,7 +626,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: create_email_template ---
-  server.tool(
+  tool(server,
     "create_email_template",
     "Create a reusable email template for the organization.",
     {
@@ -629,7 +637,7 @@ function createMcpServer() {
       body: z.string().describe("Email body template content"),
     },
     async ({ org_id, user_id, name, subject, body }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("email_templates")
         .insert({ org_id, created_by: user_id, name, subject, body })
         .select()
@@ -641,7 +649,7 @@ function createMcpServer() {
   );
 
   // --- TOOL: get_dashboard_stats ---
-  server.tool(
+  tool(server,
     "get_dashboard_stats",
     "Get comprehensive CRM analytics including contact counts by stage, deal values, pending/overdue tasks, and upcoming events.",
     {
@@ -652,11 +660,11 @@ function createMcpServer() {
       const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
       const [contactsRes, dealsRes, tasksRes, overdueRes, eventsRes] = await Promise.all([
-        supabaseAdmin.from("contacts").select("stage").eq("org_id", org_id),
-        supabaseAdmin.from("deals").select("stage, value").eq("org_id", org_id),
-        supabaseAdmin.from("tasks").select("id").eq("org_id", org_id).eq("status", "pending"),
-        supabaseAdmin.from("tasks").select("id").eq("org_id", org_id).eq("status", "pending").lt("due_date", now),
-        supabaseAdmin.from("events").select("id").eq("org_id", org_id).gte("start_at", now).lte("start_at", weekFromNow),
+        getCtx().db.from("contacts").select("stage").eq("org_id", org_id),
+        getCtx().db.from("deals").select("stage, value").eq("org_id", org_id),
+        getCtx().db.from("tasks").select("id").eq("org_id", org_id).eq("status", "pending"),
+        getCtx().db.from("tasks").select("id").eq("org_id", org_id).eq("status", "pending").lt("due_date", now),
+        getCtx().db.from("events").select("id").eq("org_id", org_id).gte("start_at", now).lte("start_at", weekFromNow),
       ]);
 
       const contacts = contactsRes.data ?? [];
@@ -705,7 +713,7 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: add_tag ---
-  server.tool(
+  tool(server,
     "add_tag",
     "Add a tag to a contact. Skips if the tag already exists on the contact.",
     {
@@ -713,7 +721,7 @@ Events this week: ${eventsThisWeek}`;
       tag: z.string().describe("The tag to add"),
     },
     async ({ contact_id, tag }) => {
-      const { data: contact, error: fetchError } = await supabaseAdmin
+      const { data: contact, error: fetchError } = await getCtx().db
         .from("contacts")
         .select("tags")
         .eq("id", contact_id)
@@ -726,7 +734,7 @@ Events this week: ${eventsThisWeek}`;
         return { content: [{ type: "text" as const, text: `Tag "${tag}" already exists on contact ${contact_id}.` }] };
       }
 
-      const { error } = await supabaseAdmin
+      const { error } = await getCtx().db
         .from("contacts")
         .update({ tags: [...currentTags, tag], updated_at: new Date().toISOString() })
         .eq("id", contact_id);
@@ -737,7 +745,7 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: remove_tag ---
-  server.tool(
+  tool(server,
     "remove_tag",
     "Remove a tag from a contact.",
     {
@@ -745,7 +753,7 @@ Events this week: ${eventsThisWeek}`;
       tag: z.string().describe("The tag to remove"),
     },
     async ({ contact_id, tag }) => {
-      const { data: contact, error: fetchError } = await supabaseAdmin
+      const { data: contact, error: fetchError } = await getCtx().db
         .from("contacts")
         .select("tags")
         .eq("id", contact_id)
@@ -760,7 +768,7 @@ Events this week: ${eventsThisWeek}`;
         return { content: [{ type: "text" as const, text: `Tag "${tag}" not found on contact ${contact_id}.` }] };
       }
 
-      const { error } = await supabaseAdmin
+      const { error } = await getCtx().db
         .from("contacts")
         .update({ tags: updatedTags, updated_at: new Date().toISOString() })
         .eq("id", contact_id);
@@ -775,7 +783,7 @@ Events this week: ${eventsThisWeek}`;
   // ==================================================================
 
   // --- TOOL: create_lead ---
-  server.tool(
+  tool(server,
     "create_lead",
     "Create a new lead (inquiry) in the CRM. Leads are inquiries that haven't become customers yet. Convert them with convert_lead_to_contact when they're ready.",
     {
@@ -792,7 +800,7 @@ Events this week: ${eventsThisWeek}`;
       notes: z.string().optional().describe("Free-form notes"),
     },
     async ({ org_id, first_name, last_name, phone, email, address, source, frequency, temperature, stage, notes }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("leads")
         .insert({
           org_id,
@@ -816,7 +824,7 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: list_leads ---
-  server.tool(
+  tool(server,
     "list_leads",
     "List leads with optional filters. Useful for questions like 'how many hot leads do we have?' or 'show me all new leads from referrals'.",
     {
@@ -828,7 +836,7 @@ Events this week: ${eventsThisWeek}`;
       limit: z.number().optional().describe("Max rows to return (default: 25)"),
     },
     async ({ org_id, stage, temperature, source, assigned_to, limit }) => {
-      let query = supabaseAdmin
+      let query = getCtx().db
         .from("leads")
         .select("id, first_name, last_name, phone, email, address, source, frequency, temperature, stage, assigned_to, created_at")
         .eq("org_id", org_id)
@@ -848,21 +856,21 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: get_lead ---
-  server.tool(
+  tool(server,
     "get_lead",
     "Get full details of a specific lead by its ID.",
     {
       lead_id: z.number().describe("The lead ID"),
     },
     async ({ lead_id }) => {
-      const { data, error } = await supabaseAdmin.from("leads").select("*").eq("id", lead_id).single();
+      const { data, error } = await getCtx().db.from("leads").select("*").eq("id", lead_id).single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
   // --- TOOL: update_lead ---
-  server.tool(
+  tool(server,
     "update_lead",
     "Update one or more fields on an existing lead.",
     {
@@ -886,14 +894,14 @@ Events this week: ${eventsThisWeek}`;
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
       updates.updated_at = new Date().toISOString();
 
-      const { data, error } = await supabaseAdmin.from("leads").update(updates).eq("id", lead_id).select().single();
+      const { data, error } = await getCtx().db.from("leads").update(updates).eq("id", lead_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Lead updated: ${data.first_name} ${data.last_name} (ID: ${data.id})` }] };
     }
   );
 
   // --- TOOL: update_lead_stage ---
-  server.tool(
+  tool(server,
     "update_lead_stage",
     "Move a lead to a different pipeline stage (new, contacted, qualified, negotiating, won, lost).",
     {
@@ -901,7 +909,7 @@ Events this week: ${eventsThisWeek}`;
       stage: z.enum(["new", "contacted", "qualified", "negotiating", "won", "lost"]).describe("The new stage"),
     },
     async ({ lead_id, stage }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("leads")
         .update({ stage, updated_at: new Date().toISOString() })
         .eq("id", lead_id)
@@ -913,7 +921,7 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: update_lead_temperature ---
-  server.tool(
+  tool(server,
     "update_lead_temperature",
     "Set a lead's temperature (hot, warm, cold).",
     {
@@ -921,7 +929,7 @@ Events this week: ${eventsThisWeek}`;
       temperature: z.enum(["hot", "warm", "cold"]).describe("The new temperature"),
     },
     async ({ lead_id, temperature }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("leads")
         .update({ temperature, updated_at: new Date().toISOString() })
         .eq("id", lead_id)
@@ -933,14 +941,14 @@ Events this week: ${eventsThisWeek}`;
   );
 
   // --- TOOL: get_leads_by_stage ---
-  server.tool(
+  tool(server,
     "get_leads_by_stage",
     "Get a summary of the leads pipeline showing how many leads are in each stage.",
     {
       org_id: z.string().describe("The organization ID"),
     },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("leads")
         .select("stage, temperature")
         .eq("org_id", org_id);
@@ -975,7 +983,7 @@ By temperature:
   );
 
   // --- TOOL: convert_lead_to_contact ---
-  server.tool(
+  tool(server,
     "convert_lead_to_contact",
     "Convert a qualified lead into a contact. Creates a new contact record, links the lead via converted_contact_id, and sets lead stage to 'won'. Returns the new contact.",
     {
@@ -983,14 +991,14 @@ By temperature:
       lead_id: z.number().describe("The lead ID to convert"),
     },
     async ({ org_id, lead_id }) => {
-      const { data: lead, error: leadErr } = await supabaseAdmin.from("leads").select("*").eq("id", lead_id).single();
+      const { data: lead, error: leadErr } = await getCtx().db.from("leads").select("*").eq("id", lead_id).single();
       if (leadErr) return { content: [{ type: "text" as const, text: `Error: ${leadErr.message}` }] };
       if (lead.converted_contact_id) {
         return { content: [{ type: "text" as const, text: `Lead ${lead_id} has already been converted to contact ${lead.converted_contact_id}.` }] };
       }
 
       const fallbackEmail = `${lead.first_name.toLowerCase()}.${(lead.last_name || "contact").toLowerCase()}@unknown.local`;
-      const { data: contact, error: contactErr } = await supabaseAdmin
+      const { data: contact, error: contactErr } = await getCtx().db
         .from("contacts")
         .insert({
           org_id,
@@ -1007,7 +1015,7 @@ By temperature:
         .single();
       if (contactErr) return { content: [{ type: "text" as const, text: `Error creating contact: ${contactErr.message}` }] };
 
-      await supabaseAdmin
+      await getCtx().db
         .from("leads")
         .update({ converted_contact_id: contact.id, stage: "won", updated_at: new Date().toISOString() })
         .eq("id", lead_id);
@@ -1017,14 +1025,14 @@ By temperature:
   );
 
   // --- TOOL: delete_lead ---
-  server.tool(
+  tool(server,
     "delete_lead",
     "Permanently delete a lead by its ID.",
     {
       lead_id: z.number().describe("The lead ID to delete"),
     },
     async ({ lead_id }) => {
-      const { error } = await supabaseAdmin.from("leads").delete().eq("id", lead_id);
+      const { error } = await getCtx().db.from("leads").delete().eq("id", lead_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Lead ${lead_id} deleted.` }] };
     }
@@ -1034,12 +1042,12 @@ By temperature:
   // NOTIFICATIONS
   // ==================================================================
 
-  server.tool(
+  tool(server,
     "list_notifications",
     "List notifications for an organization (optionally unread only).",
     { org_id: z.string(), unread_only: z.boolean().optional(), limit: z.number().optional() },
     async ({ org_id, unread_only, limit }) => {
-      let query = supabaseAdmin.from("notifications").select("*")
+      let query = getCtx().db.from("notifications").select("*")
         .eq("org_id", org_id).order("created_at", { ascending: false }).limit(limit ?? 20);
       if (unread_only) query = query.eq("read", false);
       const { data, error } = await query;
@@ -1048,18 +1056,18 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "mark_notification_read",
     "Mark a notification as read.",
     { notification_id: z.number() },
     async ({ notification_id }) => {
-      const { error } = await supabaseAdmin.from("notifications").update({ read: true }).eq("id", notification_id);
+      const { error } = await getCtx().db.from("notifications").update({ read: true }).eq("id", notification_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Notification ${notification_id} marked read.` }] };
     }
   );
 
-  server.tool(
+  tool(server,
     "create_notification",
     "Create an in-app notification.",
     {
@@ -1072,7 +1080,7 @@ By temperature:
       user_id: z.string().optional(),
     },
     async (args) => {
-      const { data, error } = await supabaseAdmin.from("notifications").insert({
+      const { data, error } = await getCtx().db.from("notifications").insert({
         org_id: args.org_id, user_id: args.user_id ?? null,
         type: args.type, title: args.title, body: args.body ?? "",
         entity_type: args.entity_type ?? null, entity_id: args.entity_id ?? null,
@@ -1082,20 +1090,20 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_contact_activity_timeline",
     "Get the unified chronological activity timeline for a contact: emails, notes, tasks, events, calls, SMS, deals.",
     { contact_id: z.number(), limit: z.number().optional() },
     async ({ contact_id, limit }) => {
       const lim = limit ?? 30;
       const [emails, notes, tasks, events, calls, sms, deals] = await Promise.all([
-        supabaseAdmin.from("email_logs").select("id, subject, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("contact_notes").select("id, note, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("tasks").select("id, title, status, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("events").select("id, title, start_at").eq("contact_id", contact_id).order("start_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("calls").select("id, call_type, disposition, started_at").eq("contact_id", contact_id).order("started_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("sms_messages").select("id, direction, body, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("deals").select("id, title, value, stage, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("email_logs").select("id, subject, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("contact_notes").select("id, note, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("tasks").select("id, title, status, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("events").select("id, title, start_at").eq("contact_id", contact_id).order("start_at", { ascending: false }).limit(10),
+        getCtx().db.from("calls").select("id, call_type, disposition, started_at").eq("contact_id", contact_id).order("started_at", { ascending: false }).limit(10),
+        getCtx().db.from("sms_messages").select("id, direction, body, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("deals").select("id, title, value, stage, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
       ]);
 
       const entries: any[] = [];
@@ -1116,7 +1124,7 @@ By temperature:
   // SMS — individual 1:1 SMS threads with contacts
   // ==================================================================
 
-  server.tool(
+  tool(server,
     "send_sms",
     "Send a single SMS to a contact. Simulated — no real carrier call. 30% of outbound messages auto-generate a reply.",
     {
@@ -1125,9 +1133,9 @@ By temperature:
       body: z.string().describe("Message body"),
     },
     async ({ org_id, contact_id, body }) => {
-      const { data: contact } = await supabaseAdmin.from("contacts").select("phone").eq("id", contact_id).single();
+      const { data: contact } = await getCtx().db.from("contacts").select("phone").eq("id", contact_id).single();
       if (!contact?.phone) return { content: [{ type: "text" as const, text: "Contact has no phone number." }] };
-      const { data, error } = await supabaseAdmin.from("sms_messages").insert({
+      const { data, error } = await getCtx().db.from("sms_messages").insert({
         org_id, contact_id, direction: "outbound", body, status: "queued",
         from_number: "+18005551234", to_number: contact.phone,
       }).select().single();
@@ -1137,12 +1145,12 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "list_sms_messages",
     "List recent SMS messages across the organization.",
     { org_id: z.string(), limit: z.number().optional() },
     async ({ org_id, limit }) => {
-      const { data, error } = await supabaseAdmin.from("sms_messages")
+      const { data, error } = await getCtx().db.from("sms_messages")
         .select("id, contact_id, direction, body, status, from_number, to_number, created_at")
         .eq("org_id", org_id)
         .order("created_at", { ascending: false }).limit(limit ?? 30);
@@ -1151,12 +1159,12 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_sms_thread",
     "Get the full SMS thread with a specific contact.",
     { contact_id: z.number() },
     async ({ contact_id }) => {
-      const { data, error } = await supabaseAdmin.from("sms_messages").select("*")
+      const { data, error } = await getCtx().db.from("sms_messages").select("*")
         .eq("contact_id", contact_id).order("created_at", { ascending: true });
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       if (!data || data.length === 0) return { content: [{ type: "text" as const, text: "No SMS history." }] };
@@ -1168,30 +1176,30 @@ By temperature:
   // LOCATIONS — parking/site locations with rates and capacity
   // ==================================================================
 
-  server.tool(
+  tool(server,
     "list_locations",
     "List all locations for an organization with rates, capacity, and amenities.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin.from("locations")
+      const { data, error } = await getCtx().db.from("locations")
         .select("*").eq("org_id", org_id).order("name");
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
-  server.tool(
+  tool(server,
     "get_location",
     "Get full details of a specific location.",
     { location_id: z.number() },
     async ({ location_id }) => {
-      const { data, error } = await supabaseAdmin.from("locations").select("*").eq("id", location_id).single();
+      const { data, error } = await getCtx().db.from("locations").select("*").eq("id", location_id).single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
-  server.tool(
+  tool(server,
     "update_location",
     "Update a location's rates, capacity, or active state.",
     {
@@ -1208,20 +1216,20 @@ By temperature:
       for (const [k, v] of Object.entries(fields)) if (v !== undefined) updates[k] = v;
       if (!Object.keys(updates).length) return { content: [{ type: "text" as const, text: "No fields to update." }] };
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("locations").update(updates).eq("id", location_id).select().single();
+      const { data, error } = await getCtx().db.from("locations").update(updates).eq("id", location_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Location "${data.name}" updated.` }] };
     }
   );
 
-  server.tool(
+  tool(server,
     "get_location_occupancy",
     "Get rough occupancy stats for a location (capacity vs assigned employees).",
     { location_id: z.number() },
     async ({ location_id }) => {
       const [locRes, empRes] = await Promise.all([
-        supabaseAdmin.from("locations").select("name, capacity").eq("id", location_id).single(),
-        supabaseAdmin.from("employees").select("id", { count: "exact", head: true }).eq("location_id", location_id),
+        getCtx().db.from("locations").select("name, capacity").eq("id", location_id).single(),
+        getCtx().db.from("employees").select("id", { count: "exact", head: true }).eq("location_id", location_id),
       ]);
       if (locRes.error) return { content: [{ type: "text" as const, text: `Error: ${locRes.error.message}` }] };
       const capacity = locRes.data.capacity;
@@ -1234,12 +1242,12 @@ By temperature:
   // REPORTS — aggregated analytics
   // ==================================================================
 
-  server.tool(
+  tool(server,
     "get_revenue_report",
     "Aggregated revenue report: won deal value, pipeline value, monthly trend.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data } = await supabaseAdmin.from("deals").select("value, stage, created_at").eq("org_id", org_id);
+      const { data } = await getCtx().db.from("deals").select("value, stage, created_at").eq("org_id", org_id);
       const rows = data ?? [];
       const won = rows.filter((d) => d.stage === "won");
       const pipeline = rows.filter((d) => !["won", "lost"].includes(d.stage));
@@ -1251,12 +1259,12 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_lead_conversion_report",
     "Lead conversion analytics: total leads, conversion rate, breakdown by source and temperature.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data } = await supabaseAdmin.from("leads").select("stage, source, temperature").eq("org_id", org_id);
+      const { data } = await getCtx().db.from("leads").select("stage, source, temperature").eq("org_id", org_id);
       const rows = data ?? [];
       const total = rows.length;
       const converted = rows.filter((l) => l.stage === "won").length;
@@ -1268,15 +1276,15 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_campaign_performance",
     "Aggregate campaign performance across all sent campaigns.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data: campaigns } = await supabaseAdmin.from("campaigns").select("id, name, type").eq("org_id", org_id).eq("status", "sent");
+      const { data: campaigns } = await getCtx().db.from("campaigns").select("id, name, type").eq("org_id", org_id).eq("status", "sent");
       const out: any[] = [];
       for (const c of campaigns ?? []) {
-        const { data: recips } = await supabaseAdmin.from("campaign_recipients").select("status").eq("campaign_id", c.id);
+        const { data: recips } = await getCtx().db.from("campaign_recipients").select("status").eq("campaign_id", c.id);
         const counts: Record<string, number> = {};
         for (const r of recips ?? []) counts[r.status] = (counts[r.status] || 0) + 1;
         const delivered = (counts.delivered ?? 0) + (counts.opened ?? 0) + (counts.clicked ?? 0);
@@ -1290,13 +1298,13 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_call_analytics",
     "Aggregated call analytics over the last 60 days.",
     { org_id: z.string() },
     async ({ org_id }) => {
       const since = new Date(Date.now() - 60 * 86400000).toISOString();
-      const { data } = await supabaseAdmin.from("calls").select("call_type, disposition, duration_seconds")
+      const { data } = await getCtx().db.from("calls").select("call_type, disposition, duration_seconds")
         .eq("org_id", org_id).gte("started_at", since);
       const rows = data ?? [];
       const byType: Record<string, number> = {};
@@ -1307,15 +1315,15 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_employee_performance",
     "Per-employee metrics: write-up count and incident count.",
     { org_id: z.string() },
     async ({ org_id }) => {
       const [empRes, wuRes, incRes] = await Promise.all([
-        supabaseAdmin.from("employees").select("id, first_name, last_name").eq("org_id", org_id),
-        supabaseAdmin.from("write_ups").select("employee_id").eq("org_id", org_id),
-        supabaseAdmin.from("incident_reports").select("employee_id").eq("org_id", org_id),
+        getCtx().db.from("employees").select("id, first_name, last_name").eq("org_id", org_id),
+        getCtx().db.from("write_ups").select("employee_id").eq("org_id", org_id),
+        getCtx().db.from("incident_reports").select("employee_id").eq("org_id", org_id),
       ]);
       const wu: Record<number, number> = {}; for (const w of wuRes.data ?? []) wu[w.employee_id] = (wu[w.employee_id] || 0) + 1;
       const inc: Record<number, number> = {}; for (const i of incRes.data ?? []) if (i.employee_id) inc[i.employee_id] = (inc[i.employee_id] || 0) + 1;
@@ -1332,7 +1340,7 @@ By temperature:
   // HR & OPERATIONS — employees, incidents, write-ups, intakes
   // ==================================================================
 
-  server.tool(
+  tool(server,
     "list_employees",
     "List employees with optional location/role/status filters.",
     {
@@ -1342,7 +1350,7 @@ By temperature:
       status: z.enum(["active", "on_leave", "terminated"]).optional(),
     },
     async ({ org_id, location_id, role, status }) => {
-      let query = supabaseAdmin.from("employees")
+      let query = getCtx().db.from("employees")
         .select("id, first_name, last_name, role, location_id, status, phone, email, hire_date")
         .eq("org_id", org_id)
         .order("created_at", { ascending: false });
@@ -1355,15 +1363,15 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "get_employee",
     "Get full employee details including incidents and write-ups count.",
     { employee_id: z.number() },
     async ({ employee_id }) => {
       const [empRes, wuRes, incRes] = await Promise.all([
-        supabaseAdmin.from("employees").select("*").eq("id", employee_id).single(),
-        supabaseAdmin.from("write_ups").select("id", { count: "exact", head: true }).eq("employee_id", employee_id),
-        supabaseAdmin.from("incident_reports").select("id", { count: "exact", head: true }).eq("employee_id", employee_id),
+        getCtx().db.from("employees").select("*").eq("id", employee_id).single(),
+        getCtx().db.from("write_ups").select("id", { count: "exact", head: true }).eq("employee_id", employee_id),
+        getCtx().db.from("incident_reports").select("id", { count: "exact", head: true }).eq("employee_id", employee_id),
       ]);
       if (empRes.error) return { content: [{ type: "text" as const, text: `Error: ${empRes.error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify({
@@ -1372,7 +1380,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "create_employee",
     "Hire a new employee.",
     {
@@ -1386,7 +1394,7 @@ By temperature:
       hire_date: z.string().optional(),
     },
     async (args) => {
-      const { data, error } = await supabaseAdmin.from("employees").insert({
+      const { data, error } = await getCtx().db.from("employees").insert({
         org_id: args.org_id, first_name: args.first_name, last_name: args.last_name ?? "",
         role: args.role ?? "attendant", location_id: args.location_id ?? null,
         phone: args.phone ?? "", email: args.email ?? "",
@@ -1397,7 +1405,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "update_employee",
     "Update an employee's role, location, status, contact info.",
     {
@@ -1415,13 +1423,13 @@ By temperature:
       for (const [k, v] of Object.entries(fields)) if (v !== undefined) updates[k] = v;
       if (!Object.keys(updates).length) return { content: [{ type: "text" as const, text: "No fields to update." }] };
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("employees").update(updates).eq("id", employee_id).select().single();
+      const { data, error } = await getCtx().db.from("employees").update(updates).eq("id", employee_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Employee ${data.first_name} ${data.last_name} updated.` }] };
     }
   );
 
-  server.tool(
+  tool(server,
     "list_incidents",
     "List incident reports with filters.",
     {
@@ -1430,7 +1438,7 @@ By temperature:
       severity: z.enum(["low", "medium", "high", "critical"]).optional(),
     },
     async ({ org_id, status, severity }) => {
-      let query = supabaseAdmin.from("incident_reports").select("*")
+      let query = getCtx().db.from("incident_reports").select("*")
         .eq("org_id", org_id).order("incident_date", { ascending: false });
       if (status) query = query.eq("status", status);
       if (severity) query = query.eq("severity", severity);
@@ -1440,7 +1448,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "create_incident",
     "File a new incident report.",
     {
@@ -1453,7 +1461,7 @@ By temperature:
       incident_date: z.string().optional(),
     },
     async (args) => {
-      const { data, error } = await supabaseAdmin.from("incident_reports").insert({
+      const { data, error } = await getCtx().db.from("incident_reports").insert({
         org_id: args.org_id, employee_id: args.employee_id ?? null,
         location_id: args.location_id ?? null,
         incident_date: args.incident_date ?? new Date().toISOString(),
@@ -1465,12 +1473,12 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "list_write_ups",
     "List employee write-ups. Filter by employee_id if given.",
     { org_id: z.string(), employee_id: z.number().optional() },
     async ({ org_id, employee_id }) => {
-      let query = supabaseAdmin.from("write_ups").select("*")
+      let query = getCtx().db.from("write_ups").select("*")
         .eq("org_id", org_id).order("write_up_date", { ascending: false });
       if (employee_id) query = query.eq("employee_id", employee_id);
       const { data, error } = await query;
@@ -1479,7 +1487,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "create_write_up",
     "Issue a write-up to an employee.",
     {
@@ -1490,7 +1498,7 @@ By temperature:
       severity: z.enum(["verbal", "written", "final"]).optional(),
     },
     async (args) => {
-      const { data, error } = await supabaseAdmin.from("write_ups").insert({
+      const { data, error } = await getCtx().db.from("write_ups").insert({
         org_id: args.org_id, employee_id: args.employee_id,
         reason: args.reason, description: args.description ?? "",
         severity: args.severity ?? "verbal",
@@ -1500,7 +1508,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "list_intakes",
     "List employee intake applications.",
     {
@@ -1508,7 +1516,7 @@ By temperature:
       status: z.enum(["applied", "screening", "interview", "offer", "hired", "rejected"]).optional(),
     },
     async ({ org_id, status }) => {
-      let query = supabaseAdmin.from("employee_intakes").select("*")
+      let query = getCtx().db.from("employee_intakes").select("*")
         .eq("org_id", org_id).order("created_at", { ascending: false });
       if (status) query = query.eq("status", status);
       const { data, error } = await query;
@@ -1517,7 +1525,7 @@ By temperature:
     }
   );
 
-  server.tool(
+  tool(server,
     "update_intake_status",
     "Move an applicant to a new stage (applied → screening → interview → offer → hired / rejected).",
     {
@@ -1528,7 +1536,7 @@ By temperature:
     async ({ intake_id, status, notes }) => {
       const updates: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
       if (notes !== undefined) updates.notes = notes;
-      const { data, error } = await supabaseAdmin.from("employee_intakes").update(updates).eq("id", intake_id).select().single();
+      const { data, error } = await getCtx().db.from("employee_intakes").update(updates).eq("id", intake_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Applicant ${data.applicant_name} → ${data.status}` }] };
     }
@@ -1539,7 +1547,7 @@ By temperature:
   // ==================================================================
 
   // --- TOOL: create_campaign ---
-  server.tool(
+  tool(server,
     "create_campaign",
     "Create a new campaign (email or SMS) as a draft. Audience is rebuilt from audience_filter at send time.",
     {
@@ -1558,14 +1566,14 @@ By temperature:
     },
     async ({ org_id, name, type, subject, body, audience_filter, template_id }) => {
       const filter = audience_filter ?? {};
-      let aq = supabaseAdmin.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", org_id);
+      let aq = getCtx().db.from("contacts").select("id", { count: "exact", head: true }).eq("org_id", org_id);
       if (filter.stage?.length) aq = aq.in("stage", filter.stage);
       if (filter.sources?.length) aq = aq.in("source", filter.sources);
       if (filter.cities?.length) aq = aq.in("city", filter.cities);
       if (filter.tags?.length) aq = aq.overlaps("tags", filter.tags);
       const { count } = await aq;
 
-      const { data, error } = await supabaseAdmin.from("campaigns").insert({
+      const { data, error } = await getCtx().db.from("campaigns").insert({
         org_id, name, type, subject: subject ?? "", body,
         audience_filter: filter, audience_size: count ?? 0,
         template_id: template_id ?? null, status: "draft",
@@ -1576,7 +1584,7 @@ By temperature:
   );
 
   // --- TOOL: list_campaigns ---
-  server.tool(
+  tool(server,
     "list_campaigns",
     "List campaigns for an organization. Supports status filtering.",
     {
@@ -1585,7 +1593,7 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ org_id, status, limit }) => {
-      let query = supabaseAdmin.from("campaigns")
+      let query = getCtx().db.from("campaigns")
         .select("id, name, type, status, audience_size, subject, scheduled_at, sent_at, created_at")
         .eq("org_id", org_id)
         .order("created_at", { ascending: false })
@@ -1599,24 +1607,24 @@ By temperature:
   );
 
   // --- TOOL: get_campaign ---
-  server.tool(
+  tool(server,
     "get_campaign",
     "Get full details of a specific campaign.",
     { campaign_id: z.number() },
     async ({ campaign_id }) => {
-      const { data, error } = await supabaseAdmin.from("campaigns").select("*").eq("id", campaign_id).single();
+      const { data, error } = await getCtx().db.from("campaigns").select("*").eq("id", campaign_id).single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
   // --- TOOL: get_campaign_stats ---
-  server.tool(
+  tool(server,
     "get_campaign_stats",
     "Get aggregated stats for a campaign: total, sent, delivered, opened, clicked, bounced, open/click/bounce rate.",
     { campaign_id: z.number() },
     async ({ campaign_id }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("campaign_recipients")
         .select("status")
         .eq("campaign_id", campaign_id);
@@ -1639,19 +1647,19 @@ By temperature:
   );
 
   // --- TOOL: send_campaign ---
-  server.tool(
+  tool(server,
     "send_campaign",
     "Send a draft or scheduled campaign immediately. Builds recipient list from audience filter and simulates delivery.",
     { campaign_id: z.number() },
     async ({ campaign_id }) => {
-      const { data: campaign, error: cerr } = await supabaseAdmin.from("campaigns").select("*").eq("id", campaign_id).single();
+      const { data: campaign, error: cerr } = await getCtx().db.from("campaigns").select("*").eq("id", campaign_id).single();
       if (cerr) return { content: [{ type: "text" as const, text: `Error: ${cerr.message}` }] };
       if (!["draft", "scheduled"].includes(campaign.status)) {
         return { content: [{ type: "text" as const, text: `Cannot send campaign — current status: ${campaign.status}` }] };
       }
 
       const filter = campaign.audience_filter ?? {};
-      let query = supabaseAdmin.from("contacts").select("id, email, phone").eq("org_id", campaign.org_id);
+      let query = getCtx().db.from("contacts").select("id, email, phone").eq("org_id", campaign.org_id);
       if (filter.stage?.length) query = query.in("stage", filter.stage);
       if (filter.sources?.length) query = query.in("source", filter.sources);
       if (filter.cities?.length) query = query.in("city", filter.cities);
@@ -1670,7 +1678,7 @@ By temperature:
         to_phone: campaign.type === "sms" ? a.phone : "",
         status: "pending",
       }));
-      const { error: ierr } = await supabaseAdmin.from("campaign_recipients").insert(rows);
+      const { error: ierr } = await getCtx().db.from("campaign_recipients").insert(rows);
       if (ierr) return { content: [{ type: "text" as const, text: `Error: ${ierr.message}` }] };
 
       if (campaign.type === "email") void simulateEmailSend(campaign_id);
@@ -1681,12 +1689,12 @@ By temperature:
   );
 
   // --- TOOL: schedule_campaign ---
-  server.tool(
+  tool(server,
     "schedule_campaign",
     "Schedule a draft campaign to send at a future time. Note: demo mode does not auto-run scheduled sends; use send_campaign to kick off delivery.",
     { campaign_id: z.number(), scheduled_at: z.string().describe("ISO timestamp") },
     async ({ campaign_id, scheduled_at }) => {
-      const { data, error } = await supabaseAdmin.from("campaigns")
+      const { data, error } = await getCtx().db.from("campaigns")
         .update({ status: "scheduled", scheduled_at, updated_at: new Date().toISOString() })
         .eq("id", campaign_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
@@ -1695,7 +1703,7 @@ By temperature:
   );
 
   // --- TOOL: get_campaign_recipients ---
-  server.tool(
+  tool(server,
     "get_campaign_recipients",
     "List recipients for a campaign with per-recipient status.",
     {
@@ -1704,7 +1712,7 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ campaign_id, status, limit }) => {
-      let query = supabaseAdmin.from("campaign_recipients")
+      let query = getCtx().db.from("campaign_recipients")
         .select("id, contact_id, to_email, to_phone, status, sent_at, opened_at, clicked_at")
         .eq("campaign_id", campaign_id)
         .order("id", { ascending: true })
@@ -1717,12 +1725,12 @@ By temperature:
   );
 
   // --- TOOL: cancel_campaign ---
-  server.tool(
+  tool(server,
     "cancel_campaign",
     "Cancel a scheduled or draft campaign.",
     { campaign_id: z.number() },
     async ({ campaign_id }) => {
-      const { data, error } = await supabaseAdmin.from("campaigns")
+      const { data, error } = await getCtx().db.from("campaigns")
         .update({ status: "cancelled", updated_at: new Date().toISOString() })
         .eq("id", campaign_id).select("id, name").single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
@@ -1735,7 +1743,7 @@ By temperature:
   // ==================================================================
 
   // --- TOOL: create_voice_agent ---
-  server.tool(
+  tool(server,
     "create_voice_agent",
     "Create a new AI voice agent (the persona that answers the phone).",
     {
@@ -1748,7 +1756,7 @@ By temperature:
       is_active: z.boolean().optional(),
     },
     async ({ org_id, name, voice, greeting, system_prompt, tools_enabled, is_active }) => {
-      const { data, error } = await supabaseAdmin.from("voice_agents").insert({
+      const { data, error } = await getCtx().db.from("voice_agents").insert({
         org_id, name, voice,
         greeting: greeting ?? "",
         system_prompt: system_prompt ?? "",
@@ -1761,12 +1769,12 @@ By temperature:
   );
 
   // --- TOOL: list_voice_agents ---
-  server.tool(
+  tool(server,
     "list_voice_agents",
     "List all voice agents for an organization.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin.from("voice_agents")
+      const { data, error } = await getCtx().db.from("voice_agents")
         .select("id, name, voice, greeting, is_active")
         .eq("org_id", org_id)
         .order("created_at", { ascending: true });
@@ -1777,7 +1785,7 @@ By temperature:
   );
 
   // --- TOOL: update_voice_agent ---
-  server.tool(
+  tool(server,
     "update_voice_agent",
     "Update fields on an existing voice agent (name, voice, greeting, system prompt, tool list, active state).",
     {
@@ -1794,14 +1802,14 @@ By temperature:
       for (const [k, v] of Object.entries(fields)) if (v !== undefined) updates[k] = v;
       if (Object.keys(updates).length === 0) return { content: [{ type: "text" as const, text: "No fields to update." }] };
       updates.updated_at = new Date().toISOString();
-      const { data, error } = await supabaseAdmin.from("voice_agents").update(updates).eq("id", agent_id).select().single();
+      const { data, error } = await getCtx().db.from("voice_agents").update(updates).eq("id", agent_id).select().single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Voice agent "${data.name}" updated.` }] };
     }
   );
 
   // --- TOOL: list_calls ---
-  server.tool(
+  tool(server,
     "list_calls",
     "List phone calls with optional filters. Answers questions like 'how many support calls happened this week?' or 'show me calls that created leads'.",
     {
@@ -1813,7 +1821,7 @@ By temperature:
       limit: z.number().optional().describe("Max rows (default: 20)"),
     },
     async ({ org_id, call_type, disposition, direction, contact_id, limit }) => {
-      let query = supabaseAdmin.from("calls")
+      let query = getCtx().db.from("calls")
         .select("id, caller_name, caller_phone, call_type, disposition, direction, duration_seconds, started_at, contact_id, voice_agent_id")
         .eq("org_id", org_id)
         .order("started_at", { ascending: false })
@@ -1830,24 +1838,24 @@ By temperature:
   );
 
   // --- TOOL: get_call ---
-  server.tool(
+  tool(server,
     "get_call",
     "Get full details of a specific call by its ID.",
     { call_id: z.number() },
     async ({ call_id }) => {
-      const { data, error } = await supabaseAdmin.from("calls").select("*").eq("id", call_id).single();
+      const { data, error } = await getCtx().db.from("calls").select("*").eq("id", call_id).single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
   );
 
   // --- TOOL: get_call_transcript ---
-  server.tool(
+  tool(server,
     "get_call_transcript",
     "Get the full transcript, AI summary, and next-step checklist for a call.",
     { call_id: z.number() },
     async ({ call_id }) => {
-      const { data, error } = await supabaseAdmin.from("call_transcripts")
+      const { data, error } = await getCtx().db.from("call_transcripts")
         .select("*").eq("call_id", call_id).maybeSingle();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       if (!data) return { content: [{ type: "text" as const, text: `No transcript recorded for call ${call_id}.` }] };
@@ -1856,7 +1864,7 @@ By temperature:
   );
 
   // --- TOOL: summarize_call ---
-  server.tool(
+  tool(server,
     "summarize_call",
     "Set or overwrite the AI summary + next-steps for a call's transcript. Use after reviewing raw turns.",
     {
@@ -1865,26 +1873,26 @@ By temperature:
       next_steps: z.array(z.string()).optional().describe("Next-step checklist"),
     },
     async ({ call_id, summary, next_steps }) => {
-      const { data: existing } = await supabaseAdmin.from("call_transcripts").select("id").eq("call_id", call_id).maybeSingle();
+      const { data: existing } = await getCtx().db.from("call_transcripts").select("id").eq("call_id", call_id).maybeSingle();
       const payload = { summary, next_steps: next_steps ?? [] };
       if (existing) {
-        const { error } = await supabaseAdmin.from("call_transcripts").update(payload).eq("call_id", call_id);
+        const { error } = await getCtx().db.from("call_transcripts").update(payload).eq("call_id", call_id);
         if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
         return { content: [{ type: "text" as const, text: `Summary updated for call ${call_id}.` }] };
       }
-      const { error } = await supabaseAdmin.from("call_transcripts").insert({ call_id, turns: [], ...payload });
+      const { error } = await getCtx().db.from("call_transcripts").insert({ call_id, turns: [], ...payload });
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Summary created for call ${call_id}.` }] };
     }
   );
 
   // --- TOOL: get_call_stats ---
-  server.tool(
+  tool(server,
     "get_call_stats",
     "Get aggregated call metrics: today/week/month volume, AI handle rate, avg duration, calls by type, and leads created.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data, error } = await supabaseAdmin.from("calls")
+      const { data, error } = await getCtx().db.from("calls")
         .select("started_at, duration_seconds, call_type, disposition")
         .eq("org_id", org_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
@@ -1919,7 +1927,7 @@ By temperature:
   );
 
   // --- TOOL: list_chat_sessions ---
-  server.tool(
+  tool(server,
     "list_chat_sessions",
     "List AI chat sessions (website / widget).",
     {
@@ -1928,7 +1936,7 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ org_id, status, limit }) => {
-      let query = supabaseAdmin.from("chat_sessions")
+      let query = getCtx().db.from("chat_sessions")
         .select("id, visitor_name, channel, status, summary, started_at, ended_at")
         .eq("org_id", org_id)
         .order("started_at", { ascending: false })
@@ -1942,7 +1950,7 @@ By temperature:
   );
 
   // --- TOOL: get_activity_feed ---
-  server.tool(
+  tool(server,
     "get_activity_feed",
     "Get the recent activity feed across all contacts in the organization.",
     {
@@ -1950,7 +1958,7 @@ By temperature:
       limit: z.number().optional().describe("Maximum number of activities to return (default: 20)"),
     },
     async ({ org_id, limit }) => {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await getCtx().db
         .from("activities")
         .select("id, type, content, metadata, contact_id, created_at")
         .eq("org_id", org_id)
@@ -1968,20 +1976,20 @@ By temperature:
   // ==========================================================================
 
   // --- TOOL: list_storm_events ---
-  server.tool(
+  tool(server,
     "list_storm_events",
     "List storm events (hail, wind, tropical, ice) that this org tracks, with counts of linked leads and jobs.",
     { org_id: z.string() },
     async ({ org_id }) => {
-      const { data: storms, error } = await supabaseAdmin
+      const { data: storms, error } = await getCtx().db
         .from("storm_events")
         .select("id, name, event_date, storm_type, counties, description")
         .eq("org_id", org_id)
         .order("event_date", { ascending: false });
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       const enriched = await Promise.all((storms ?? []).map(async (s: any) => {
-        const { count: leadCount } = await supabaseAdmin.from("leads").select("id", { count: "exact", head: true }).eq("org_id", org_id).eq("storm_event_id", s.id);
-        const { count: jobCount } = await supabaseAdmin.from("jobs").select("id", { count: "exact", head: true }).eq("org_id", org_id).eq("storm_event_id", s.id);
+        const { count: leadCount } = await getCtx().db.from("leads").select("id", { count: "exact", head: true }).eq("org_id", org_id).eq("storm_event_id", s.id);
+        const { count: jobCount } = await getCtx().db.from("jobs").select("id", { count: "exact", head: true }).eq("org_id", org_id).eq("storm_event_id", s.id);
         return { ...s, lead_count: leadCount ?? 0, job_count: jobCount ?? 0 };
       }));
       return { content: [{ type: "text" as const, text: JSON.stringify(enriched, null, 2) }] };
@@ -1989,7 +1997,7 @@ By temperature:
   );
 
   // --- TOOL: get_leads_by_storm_event ---
-  server.tool(
+  tool(server,
     "get_leads_by_storm_event",
     "List all leads tagged to a specific storm event. Use this to answer 'which leads came in from the Feb Atlanta hailstorm?'",
     {
@@ -2000,12 +2008,12 @@ By temperature:
     async ({ org_id, storm_event_id, storm_name }) => {
       let eventId = storm_event_id;
       if (!eventId && storm_name) {
-        const { data: storms } = await supabaseAdmin.from("storm_events")
+        const { data: storms } = await getCtx().db.from("storm_events")
           .select("id, name").eq("org_id", org_id).ilike("name", `%${storm_name}%`).limit(1);
         eventId = storms?.[0]?.id;
       }
       if (!eventId) return { content: [{ type: "text" as const, text: "No matching storm event found." }] };
-      const { data, error } = await supabaseAdmin.from("leads")
+      const { data, error } = await getCtx().db.from("leads")
         .select("id, first_name, last_name, property_address, city, state, stage, insurance_carrier, claim_number, estimated_retail_amount, created_at")
         .eq("org_id", org_id).eq("storm_event_id", eventId).order("created_at", { ascending: false });
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
@@ -2014,7 +2022,7 @@ By temperature:
   );
 
   // --- TOOL: list_adjusters ---
-  server.tool(
+  tool(server,
     "list_adjusters",
     "List insurance adjusters the org has worked with, with carrier, territory, and performance stats.",
     {
@@ -2023,7 +2031,7 @@ By temperature:
       territory: z.string().optional(),
     },
     async ({ org_id, carrier, territory }) => {
-      let q = supabaseAdmin.from("insurance_adjusters")
+      let q = getCtx().db.from("insurance_adjusters")
         .select("id, name, carrier, territory, phone, email, avg_approval_days, avg_supplement_pct, notes")
         .eq("org_id", org_id);
       if (carrier) q = q.eq("carrier", carrier);
@@ -2035,7 +2043,7 @@ By temperature:
   );
 
   // --- TOOL: get_adjuster_stats ---
-  server.tool(
+  tool(server,
     "get_adjuster_stats",
     "Ranked adjuster performance: fastest approvers, highest supplement rates, and total approved $ across jobs. Use for 'which adjusters approve supplements fastest'.",
     {
@@ -2044,11 +2052,11 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ org_id, rank_by = "avg_supplement_pct", limit = 12 }) => {
-      const { data: adjs, error } = await supabaseAdmin.from("insurance_adjusters")
+      const { data: adjs, error } = await getCtx().db.from("insurance_adjusters")
         .select("id, name, carrier, territory, avg_approval_days, avg_supplement_pct, notes")
         .eq("org_id", org_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
-      const { data: jobs } = await supabaseAdmin.from("jobs")
+      const { data: jobs } = await getCtx().db.from("jobs")
         .select("adjuster_id, insurance_approved_amount, supplements_amount")
         .eq("org_id", org_id);
       const byAdjuster = new Map<number, { approved: number; supp: number; count: number }>();
@@ -2075,7 +2083,7 @@ By temperature:
   );
 
   // --- TOOL: list_jobs ---
-  server.tool(
+  tool(server,
     "list_jobs",
     "List roofing jobs, optionally filtered by status, market/state, crew, date range, or storm event.",
     {
@@ -2087,7 +2095,7 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ org_id, status, state, crew_id, storm_event_id, limit = 50 }) => {
-      let q = supabaseAdmin.from("jobs")
+      let q = getCtx().db.from("jobs")
         .select("id, property_address, city, state, roof_type, squares, status, insurance_carrier, claim_number, estimated_retail_amount, insurance_approved_amount, supplements_amount, final_contract_amount, scheduled_start_date, actual_start_date, actual_end_date, crew_id, adjuster_id, contact_id, lead_id, storm_event_id")
         .eq("org_id", org_id)
         .order("scheduled_start_date", { ascending: false, nullsFirst: false })
@@ -2103,7 +2111,7 @@ By temperature:
   );
 
   // --- TOOL: get_job_details ---
-  server.tool(
+  tool(server,
     "get_job_details",
     "Full job record including adjuster, crew, sales rep, PM, photos, and linked contact/lead names. Use for 'status update on Mark Henderson's job'.",
     {
@@ -2116,30 +2124,30 @@ By temperature:
       if (!id && customer_name && org_id) {
         const [first, ...rest] = customer_name.split(" ");
         const last = rest.join(" ");
-        const { data: leads } = await supabaseAdmin.from("leads")
+        const { data: leads } = await getCtx().db.from("leads")
           .select("id").eq("org_id", org_id).ilike("first_name", `%${first}%`).ilike("last_name", `%${last}%`).limit(1);
         if (leads?.[0]) {
-          const { data: j } = await supabaseAdmin.from("jobs").select("id").eq("lead_id", leads[0].id).limit(1);
+          const { data: j } = await getCtx().db.from("jobs").select("id").eq("lead_id", leads[0].id).limit(1);
           if (j?.[0]) id = j[0].id;
         }
         if (!id) {
-          const { data: contacts } = await supabaseAdmin.from("contacts")
+          const { data: contacts } = await getCtx().db.from("contacts")
             .select("id").eq("org_id", org_id).ilike("first_name", `%${first}%`).ilike("last_name", `%${last}%`).limit(1);
           if (contacts?.[0]) {
-            const { data: j } = await supabaseAdmin.from("jobs").select("id").eq("contact_id", contacts[0].id).limit(1);
+            const { data: j } = await getCtx().db.from("jobs").select("id").eq("contact_id", contacts[0].id).limit(1);
             if (j?.[0]) id = j[0].id;
           }
         }
       }
       if (!id) return { content: [{ type: "text" as const, text: "No job found." }] };
-      const { data, error } = await supabaseAdmin.from("jobs").select("*").eq("id", id).single();
+      const { data, error } = await getCtx().db.from("jobs").select("*").eq("id", id).single();
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       // Enrich with adjuster + crew + sales rep names
       const [{ data: adj }, { data: crew }, { data: rep }, { data: pm }] = await Promise.all([
-        data.adjuster_id ? supabaseAdmin.from("insurance_adjusters").select("name, carrier").eq("id", data.adjuster_id).maybeSingle() : Promise.resolve({ data: null }),
-        data.crew_id ? supabaseAdmin.from("crews").select("name").eq("id", data.crew_id).maybeSingle() : Promise.resolve({ data: null }),
-        data.sales_rep_employee_id ? supabaseAdmin.from("employees").select("first_name, last_name").eq("id", data.sales_rep_employee_id).maybeSingle() : Promise.resolve({ data: null }),
-        data.pm_employee_id ? supabaseAdmin.from("employees").select("first_name, last_name").eq("id", data.pm_employee_id).maybeSingle() : Promise.resolve({ data: null }),
+        data.adjuster_id ? getCtx().db.from("insurance_adjusters").select("name, carrier").eq("id", data.adjuster_id).maybeSingle() : Promise.resolve({ data: null }),
+        data.crew_id ? getCtx().db.from("crews").select("name").eq("id", data.crew_id).maybeSingle() : Promise.resolve({ data: null }),
+        data.sales_rep_employee_id ? getCtx().db.from("employees").select("first_name, last_name").eq("id", data.sales_rep_employee_id).maybeSingle() : Promise.resolve({ data: null }),
+        data.pm_employee_id ? getCtx().db.from("employees").select("first_name, last_name").eq("id", data.pm_employee_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
       return { content: [{ type: "text" as const, text: JSON.stringify({
         ...data,
@@ -2152,25 +2160,25 @@ By temperature:
   );
 
   // --- TOOL: get_contact_full_context ---
-  server.tool(
+  tool(server,
     "get_contact_full_context",
     "Return a contact plus all related jobs, recent calls, SMS, tasks, and notes in a single payload.",
     { contact_id: z.number(), org_id: z.string().optional() },
     async ({ contact_id }) => {
       const [{ data: contact }, { data: jobs }, { data: calls }, { data: sms }, { data: tasks }, { data: notes }] = await Promise.all([
-        supabaseAdmin.from("contacts").select("*").eq("id", contact_id).maybeSingle(),
-        supabaseAdmin.from("jobs").select("id, status, property_address, estimated_retail_amount, final_contract_amount, scheduled_start_date").eq("contact_id", contact_id),
-        supabaseAdmin.from("calls").select("id, direction, call_type, disposition, started_at, duration_seconds").eq("contact_id", contact_id).order("started_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("sms_messages").select("id, direction, body, sent_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
-        supabaseAdmin.from("tasks").select("id, title, status, due_date, priority").eq("contact_id", contact_id).order("due_date", { ascending: true }).limit(10),
-        supabaseAdmin.from("contact_notes").select("note, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("contacts").select("*").eq("id", contact_id).maybeSingle(),
+        getCtx().db.from("jobs").select("id, status, property_address, estimated_retail_amount, final_contract_amount, scheduled_start_date").eq("contact_id", contact_id),
+        getCtx().db.from("calls").select("id, direction, call_type, disposition, started_at, duration_seconds").eq("contact_id", contact_id).order("started_at", { ascending: false }).limit(10),
+        getCtx().db.from("sms_messages").select("id, direction, body, sent_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
+        getCtx().db.from("tasks").select("id, title, status, due_date, priority").eq("contact_id", contact_id).order("due_date", { ascending: true }).limit(10),
+        getCtx().db.from("contact_notes").select("note, created_at").eq("contact_id", contact_id).order("created_at", { ascending: false }).limit(10),
       ]);
       return { content: [{ type: "text" as const, text: JSON.stringify({ contact, jobs, calls, sms, tasks, notes }, null, 2) }] };
     }
   );
 
   // --- TOOL: get_pipeline_stuck_leads ---
-  server.tool(
+  tool(server,
     "get_pipeline_stuck_leads",
     "Leads that have been in a stage longer than N days. Default: insurance_pending > 14 days. Use for 'show me insurance claims stuck > 14 days'.",
     {
@@ -2180,7 +2188,7 @@ By temperature:
     },
     async ({ org_id, stage = "insurance_pending", min_days = 14 }) => {
       const cutoff = new Date(Date.now() - min_days * 86_400_000).toISOString();
-      const { data, error } = await supabaseAdmin.from("leads")
+      const { data, error } = await getCtx().db.from("leads")
         .select("id, first_name, last_name, property_address, city, state, stage, insurance_carrier, claim_number, adjuster_id, estimated_retail_amount, estimated_insurance_amount, notes, created_at")
         .eq("org_id", org_id).eq("stage", stage).lte("created_at", cutoff)
         .order("created_at", { ascending: true });
@@ -2195,7 +2203,7 @@ By temperature:
   );
 
   // --- TOOL: get_supplement_performance ---
-  server.tool(
+  tool(server,
     "get_supplement_performance",
     "Supplement recovery performance grouped by coordinator (supplements_coord_employee_id) or adjuster.",
     {
@@ -2203,7 +2211,7 @@ By temperature:
       group_by: z.enum(["coordinator", "adjuster"]).optional().describe("Default: coordinator"),
     },
     async ({ org_id, group_by = "coordinator" }) => {
-      const { data: jobs, error } = await supabaseAdmin.from("jobs")
+      const { data: jobs, error } = await getCtx().db.from("jobs")
         .select("supplements_coord_employee_id, adjuster_id, insurance_approved_amount, supplements_amount")
         .eq("org_id", org_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
@@ -2221,10 +2229,10 @@ By temperature:
       const ids = Array.from(groups.keys()) as number[];
       const nameMap = new Map<number, string>();
       if (group_by === "coordinator" && ids.length) {
-        const { data: emps } = await supabaseAdmin.from("employees").select("id, first_name, last_name").in("id", ids);
+        const { data: emps } = await getCtx().db.from("employees").select("id, first_name, last_name").in("id", ids);
         (emps ?? []).forEach((e: any) => nameMap.set(e.id, `${e.first_name} ${e.last_name}`));
       } else if (ids.length) {
-        const { data: adjs } = await supabaseAdmin.from("insurance_adjusters").select("id, name, carrier").in("id", ids);
+        const { data: adjs } = await getCtx().db.from("insurance_adjusters").select("id, name, carrier").in("id", ids);
         (adjs ?? []).forEach((a: any) => nameMap.set(a.id, `${a.name} (${a.carrier})`));
       }
       const rows = Array.from(groups.entries()).map(([id, s]) => ({
@@ -2240,7 +2248,7 @@ By temperature:
   );
 
   // --- TOOL: get_crew_utilization ---
-  server.tool(
+  tool(server,
     "get_crew_utilization",
     "Crew utilization for the next N days: scheduled jobs vs weekly capacity.",
     {
@@ -2250,10 +2258,10 @@ By temperature:
     async ({ org_id, days_ahead = 14 }) => {
       const today = new Date();
       const end = new Date(today.getTime() + days_ahead * 86_400_000);
-      const { data: crews } = await supabaseAdmin.from("crews")
+      const { data: crews } = await getCtx().db.from("crews")
         .select("id, name, capacity_jobs_per_week, location_id")
         .eq("org_id", org_id).eq("is_active", true);
-      const { data: jobs } = await supabaseAdmin.from("jobs")
+      const { data: jobs } = await getCtx().db.from("jobs")
         .select("crew_id, status, scheduled_start_date")
         .eq("org_id", org_id)
         .gte("scheduled_start_date", today.toISOString().slice(0, 10))
@@ -2274,7 +2282,7 @@ By temperature:
   );
 
   // --- TOOL: get_referral_network ---
-  server.tool(
+  tool(server,
     "get_referral_network",
     "Referral graph: who referred whom. Optionally filtered to a single referrer to see their downstream contacts.",
     {
@@ -2283,7 +2291,7 @@ By temperature:
       limit: z.number().optional(),
     },
     async ({ org_id, referrer_contact_id, limit = 100 }) => {
-      let q = supabaseAdmin.from("contacts")
+      let q = getCtx().db.from("contacts")
         .select("id, first_name, last_name, referred_by, created_at")
         .eq("org_id", org_id).not("referred_by", "is", null).limit(limit);
       if (referrer_contact_id) q = q.eq("referred_by", referrer_contact_id);
@@ -2292,7 +2300,7 @@ By temperature:
       // Build referrer name map
       const referrerIds = Array.from(new Set((data ?? []).map((r: any) => r.referred_by))).filter(Boolean) as number[];
       const { data: refs } = referrerIds.length
-        ? await supabaseAdmin.from("contacts").select("id, first_name, last_name").in("id", referrerIds)
+        ? await getCtx().db.from("contacts").select("id, first_name, last_name").in("id", referrerIds)
         : { data: [] as any[] };
       const nameMap = new Map((refs ?? []).map((r: any) => [r.id, `${r.first_name} ${r.last_name}`]));
       const rows = (data ?? []).map((r: any) => ({
@@ -2313,7 +2321,7 @@ By temperature:
   );
 
   // --- TOOL: list_calls_by_disposition ---
-  server.tool(
+  tool(server,
     "list_calls_by_disposition",
     "List calls filtered by disposition, optionally by call_type and a date range.",
     {
@@ -2325,7 +2333,7 @@ By temperature:
     },
     async ({ org_id, disposition, call_type, days_back = 30, limit = 50 }) => {
       const cutoff = new Date(Date.now() - days_back * 86_400_000).toISOString();
-      let q = supabaseAdmin.from("calls")
+      let q = getCtx().db.from("calls")
         .select("id, caller_name, caller_phone, call_type, disposition, duration_seconds, started_at")
         .eq("org_id", org_id).gte("started_at", cutoff)
         .order("started_at", { ascending: false }).limit(limit);
@@ -2338,12 +2346,12 @@ By temperature:
   );
 
   // --- TOOL: get_top_adjusters_by_approved_value ---
-  server.tool(
+  tool(server,
     "get_top_adjusters_by_approved_value",
     "Top adjusters ranked by total insurance-approved dollars across all jobs. Use for 'top 5 adjusters by total approved $'.",
     { org_id: z.string(), limit: z.number().optional() },
     async ({ org_id, limit = 5 }) => {
-      const { data: jobs, error } = await supabaseAdmin.from("jobs")
+      const { data: jobs, error } = await getCtx().db.from("jobs")
         .select("adjuster_id, insurance_approved_amount, supplements_amount").eq("org_id", org_id);
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       const byAdj = new Map<number, { approved: number; supp: number; count: number }>();
@@ -2357,7 +2365,7 @@ By temperature:
       }
       const ids = Array.from(byAdj.keys());
       const { data: adjs } = ids.length
-        ? await supabaseAdmin.from("insurance_adjusters").select("id, name, carrier").in("id", ids)
+        ? await getCtx().db.from("insurance_adjusters").select("id, name, carrier").in("id", ids)
         : { data: [] as any[] };
       const nameMap = new Map((adjs ?? []).map((a: any) => [a.id, `${a.name} (${a.carrier})`]));
       const rows = Array.from(byAdj.entries()).map(([id, s]) => ({
@@ -2372,14 +2380,14 @@ By temperature:
   );
 
   // --- TOOL: get_top_rep_closed_this_month ---
-  server.tool(
+  tool(server,
     "get_top_rep_closed_this_month",
     "Top sales reps by closed contract $ this calendar month. Uses jobs.sales_rep_employee_id where status='completed' or actual_end_date this month.",
     { org_id: z.string(), limit: z.number().optional() },
     async ({ org_id, limit = 5 }) => {
       const now = new Date();
       const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-      const { data: jobs, error } = await supabaseAdmin.from("jobs")
+      const { data: jobs, error } = await getCtx().db.from("jobs")
         .select("sales_rep_employee_id, final_contract_amount, status, actual_end_date, created_at")
         .eq("org_id", org_id)
         .or(`actual_end_date.gte.${start},and(created_at.gte.${start}T00:00:00Z,status.in.(scheduled,materials_ordered,in_progress,completed))`);
@@ -2394,7 +2402,7 @@ By temperature:
       }
       const ids = Array.from(byRep.keys());
       const { data: emps } = ids.length
-        ? await supabaseAdmin.from("employees").select("id, first_name, last_name, role, market").in("id", ids)
+        ? await getCtx().db.from("employees").select("id, first_name, last_name, role, market").in("id", ids)
         : { data: [] as any[] };
       const nameMap = new Map((emps ?? []).map((e: any) => [e.id, `${e.first_name} ${e.last_name} (${e.market})`]));
       const rows = Array.from(byRep.entries()).map(([id, s]) => ({
@@ -2408,12 +2416,12 @@ By temperature:
   );
 
   // --- TOOL: get_at_risk_customers ---
-  server.tool(
+  tool(server,
     "get_at_risk_customers",
     "Customers with health score < threshold (default 70). Returns name, score, tags, and last interaction type.",
     { org_id: z.string(), max_score: z.number().optional(), limit: z.number().optional() },
     async ({ org_id, max_score = 70, limit = 50 }) => {
-      const { data, error } = await supabaseAdmin.from("contacts")
+      const { data, error } = await getCtx().db.from("contacts")
         .select("id, first_name, last_name, email, phone, city, state, tags, storm_tag, customer_health_score, assigned_to")
         .eq("org_id", org_id)
         .not("customer_health_score", "is", null)
@@ -2429,14 +2437,46 @@ By temperature:
 }
 
 /**
+ * Constant-time check of x-mcp-secret header against ENV.mcpSharedSecret.
+ * Returns true if the request is authorized; otherwise responds 401 and returns false.
+ */
+function authorizeMcp(req: Request, res: Response): boolean {
+  const provided = req.header("x-mcp-secret") || "";
+  const expected = ENV.mcpSharedSecret;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  // Length-pad to expected length so timingSafeEqual doesn't throw, but still
+  // returns false when lengths differ.
+  if (a.length !== b.length) {
+    crypto.timingSafeEqual(b, b); // dummy compare to keep timing uniform
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  if (!crypto.timingSafeEqual(a, b)) {
+    res.status(401).json({ error: "Unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Register the MCP server HTTP endpoint with Express.
  * OpenClaw connects to this via streamable-http transport.
+ *
+ * Security boundary:
+ *   - x-mcp-secret header required on every request (Patch 1).
+ *   - Tool calls additionally require a verified mcp_context_token in args
+ *     (Patch 2, enforced by the tool() wrapper).
+ *   - DB access uses a per-user Supabase JWT, so RLS enforces org isolation
+ *     even if the LLM passes a wrong org_id (Patch 3).
  */
 export function registerMcpEndpoint(app: Express) {
   // Each session gets its own McpServer + Transport pair
   const sessions = new Map<string, { server: McpServer; transport: StreamableHTTPServerTransport }>();
 
   app.post("/mcp", async (req: Request, res: Response) => {
+    if (!authorizeMcp(req, res)) return;
+
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
     if (sessionId && sessions.has(sessionId)) {
@@ -2466,6 +2506,7 @@ export function registerMcpEndpoint(app: Express) {
 
   // Handle GET for SSE stream
   app.get("/mcp", async (req: Request, res: Response) => {
+    if (!authorizeMcp(req, res)) return;
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     if (sessionId && sessions.has(sessionId)) {
       const { transport } = sessions.get(sessionId)!;
@@ -2477,6 +2518,7 @@ export function registerMcpEndpoint(app: Express) {
 
   // Handle DELETE for session cleanup
   app.delete("/mcp", async (req: Request, res: Response) => {
+    if (!authorizeMcp(req, res)) return;
     const sessionId = req.headers["mcp-session-id"] as string | undefined;
     if (sessionId && sessions.has(sessionId)) {
       const { transport } = sessions.get(sessionId)!;
@@ -2487,5 +2529,5 @@ export function registerMcpEndpoint(app: Express) {
     res.status(400).json({ error: "No active session" });
   });
 
-  console.log("[MCP] CRM tools endpoint registered at /mcp");
+  console.log("[MCP] CRM tools endpoint registered at /mcp (auth: x-mcp-secret + per-call mcp_context_token)");
 }
