@@ -53,6 +53,217 @@ function placeholderContactEmail(firstName: string, lastName?: string): string {
   return `${slug}.${Date.now()}@unknown.local`;
 }
 
+const AI_CHAT_TIME_ZONE = "America/Chicago";
+
+const MONTH_INDEX: Record<string, number> = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+};
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+function getTimeZoneParts(date: Date, timeZone = AI_CHAT_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const value = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value || "0");
+
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour"),
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function zonedTimeToUtc(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+  timeZone = AI_CHAT_TIME_ZONE
+): Date {
+  let utc = new Date(Date.UTC(year, monthIndex, day, hour, minute, 0));
+  for (let i = 0; i < 2; i++) {
+    const parts = getTimeZoneParts(utc, timeZone);
+    const asUtc = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second
+    );
+    utc = new Date(utc.getTime() - (asUtc - utc.getTime()));
+  }
+  return utc;
+}
+
+function parseCalendarDate(content: string): { year: number; monthIndex: number; day: number } | null {
+  const nowParts = getTimeZoneParts(new Date());
+  const today = new Date(Date.UTC(nowParts.year, nowParts.month - 1, nowParts.day));
+
+  if (/\btoday\b/i.test(content)) {
+    return { year: nowParts.year, monthIndex: nowParts.month - 1, day: nowParts.day };
+  }
+
+  if (/\btomorrow\b/i.test(content)) {
+    const tomorrow = new Date(today);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    return {
+      year: tomorrow.getUTCFullYear(),
+      monthIndex: tomorrow.getUTCMonth(),
+      day: tomorrow.getUTCDate(),
+    };
+  }
+
+  const monthPattern = Object.keys(MONTH_INDEX).join("|");
+  const monthMatch = content.match(
+    new RegExp(`\\b(${monthPattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?\\b`, "i")
+  );
+  if (monthMatch) {
+    const monthIndex = MONTH_INDEX[monthMatch[1].toLowerCase()];
+    const day = Number(monthMatch[2]);
+    let year = monthMatch[3] ? Number(monthMatch[3]) : nowParts.year;
+    const candidate = new Date(Date.UTC(year, monthIndex, day));
+    if (!monthMatch[3] && candidate.getTime() < today.getTime() - 86400000) year += 1;
+    return { year, monthIndex, day };
+  }
+
+  const numericMatch = content.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (numericMatch) {
+    const monthIndex = Number(numericMatch[1]) - 1;
+    const day = Number(numericMatch[2]);
+    let year = numericMatch[3] ? Number(numericMatch[3]) : nowParts.year;
+    if (year < 100) year += 2000;
+    const candidate = new Date(Date.UTC(year, monthIndex, day));
+    if (!numericMatch[3] && candidate.getTime() < today.getTime() - 86400000) year += 1;
+    return { year, monthIndex, day };
+  }
+
+  const weekdayMatch = content.match(/\b(?:this|next)?\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  if (weekdayMatch) {
+    const target = WEEKDAY_INDEX[weekdayMatch[1].toLowerCase()];
+    const todayDay = today.getUTCDay();
+    let daysAhead = (target - todayDay + 7) % 7;
+    if (/\bnext\s+/i.test(weekdayMatch[0]) || daysAhead === 0) daysAhead += 7;
+    const targetDate = new Date(today);
+    targetDate.setUTCDate(targetDate.getUTCDate() + daysAhead);
+    return {
+      year: targetDate.getUTCFullYear(),
+      monthIndex: targetDate.getUTCMonth(),
+      day: targetDate.getUTCDate(),
+    };
+  }
+
+  return null;
+}
+
+function parseCalendarTime(content: string): { hour: number; minute: number } | null {
+  const match = content.match(/\b(?:at|@)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  if (!match) return null;
+
+  let hour = Number(match[1]);
+  const minute = match[2] ? Number(match[2]) : 0;
+  const meridiem = match[3]?.toLowerCase();
+  if (minute > 59 || hour < 0 || hour > 23) return null;
+
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  return { hour, minute };
+}
+
+function parseCreateCalendarEventCommand(content: string):
+  | {
+      title: string;
+      description: string;
+      startAt: string;
+      endAt: string;
+      location?: string;
+    }
+  | null {
+  const isCalendarCommand =
+    /\b(?:create|add|schedule|book)\b.*\b(?:calendar\s+)?(?:event|meeting|appointment)\b/i.test(content) ||
+    /\b(?:meeting|meet|appointment)\s+with\b/i.test(content);
+  if (!isCalendarCommand) return null;
+
+  const date = parseCalendarDate(content);
+  const time = parseCalendarTime(content);
+  if (!date || !time) return null;
+
+  const personMatch = content.match(
+    /\b(?:meeting|meet|appointment)\s+with\s+([A-Za-z][A-Za-z.' -]{0,80}?)(?=\s+(?:on|at|today|tomorrow|this|next|in|for)\b|[,.]|$)/i
+  );
+  const rawPerson = personMatch?.[1]?.trim().replace(/\s+/g, " ");
+  const title = rawPerson ? `Meeting with ${toTitleCaseName(rawPerson)}` : "Calendar Event";
+  const location = content.match(/\b(?:location|place)\s*(?:is|:)?\s*([^,.;\n]+)$/i)?.[1]?.trim();
+
+  const start = zonedTimeToUtc(date.year, date.monthIndex, date.day, time.hour, time.minute);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+
+  return {
+    title,
+    description: content,
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
+    location,
+  };
+}
+
+function formatEventTimeForReply(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: AI_CHAT_TIME_ZONE,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
 function parseCreateContactCommand(content: string):
   | {
       firstName: string;
@@ -1471,6 +1682,24 @@ export const appRouter = router({
 
         const lastUserMessage =
           input.messages.filter((m) => m.role === "user").at(-1)?.content || "";
+
+        const calendarCommand = parseCreateCalendarEventCommand(lastUserMessage);
+        if (calendarCommand) {
+          const event = await createEvent(ctx.supabase!, {
+            org_id: ctx.user.orgId!,
+            created_by: ctx.user.id,
+            title: calendarCommand.title,
+            description: calendarCommand.description,
+            start_at: calendarCommand.startAt,
+            end_at: calendarCommand.endAt,
+            location: calendarCommand.location,
+          });
+
+          return saveReply(
+            `Created calendar event "${event.title}" for ${formatEventTimeForReply(event.start_at)}.`
+          );
+        }
+
         const contactCommand = parseCreateContactCommand(lastUserMessage);
         if (contactCommand) {
           const email =
