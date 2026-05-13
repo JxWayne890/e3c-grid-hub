@@ -40,7 +40,7 @@ docker exec "$OPENCLAW_CONTAINER" openclaw plugins install --link "$PLUGIN_CONTA
   fi
 }
 
-docker exec \
+docker exec -i \
   -e E3C_CRM_MCP_SECRET="$MCP_SHARED_SECRET" \
   -e E3C_CRM_MCP_URL="$MCP_URL" \
   "$OPENCLAW_CONTAINER" \
@@ -85,5 +85,11 @@ echo "Restarting OpenClaw..."
 docker restart "$OPENCLAW_CONTAINER" >/dev/null
 sleep 8
 docker exec "$OPENCLAW_CONTAINER" sh -lc "chown -R root:root '$PLUGIN_CONTAINER_DST'"
-docker restart "$OPENCLAW_CONTAINER" >/dev/null
+if docker exec "$OPENCLAW_CONTAINER" openclaw gateway restart >/tmp/e3c-crm-gateway-restart.log 2>&1; then
+  echo "Gateway restarted after plugin permission fix."
+else
+  echo "Gateway restart command did not complete; recent output:" >&2
+  cat /tmp/e3c-crm-gateway-restart.log >&2
+  echo "Plugin files are installed and config is written. If tools are not visible, run: docker exec $OPENCLAW_CONTAINER openclaw gateway restart" >&2
+fi
 echo "Done. Wait 20 seconds, then test the AI action again."
