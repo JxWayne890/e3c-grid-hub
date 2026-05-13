@@ -50,6 +50,34 @@ export const CRM_TOOLS = [
     }
   },
   {
+    "name": "list_contacts",
+    "description": "List the most recent CRM contacts, including IDs. Use this before deleting the latest contact or when the user asks for recent contacts.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "org_id": {
+          "description": "The organization ID",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum contacts to return, default 10",
+          "type": "number",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "mcp_context_token": {
+          "description": "REQUIRED. Session context token provided in the system prompt. Pass it unchanged on every call. Never invent or modify.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "org_id",
+        "mcp_context_token"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
     "name": "create_contact",
     "description": "Create a new contact in the CRM. Returns the created contact.",
     "inputSchema": {
@@ -99,6 +127,56 @@ export const CRM_TOOLS = [
       "required": [
         "org_id",
         "first_name",
+        "mcp_context_token"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "delete_contact",
+    "description": "Delete a contact by ID from the CRM. Only use this after the user explicitly asks to delete a contact.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "org_id": {
+          "description": "The organization ID",
+          "type": "string"
+        },
+        "contact_id": {
+          "description": "The contact ID to delete",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "mcp_context_token": {
+          "description": "REQUIRED. Session context token provided in the system prompt. Pass it unchanged on every call. Never invent or modify.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "org_id",
+        "contact_id",
+        "mcp_context_token"
+      ],
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  {
+    "name": "delete_latest_contact",
+    "description": "Delete the most recently created contact in the CRM. Only use this when the user explicitly asks to delete the latest/newest contact.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "org_id": {
+          "description": "The organization ID",
+          "type": "string"
+        },
+        "mcp_context_token": {
+          "description": "REQUIRED. Session context token provided in the system prompt. Pass it unchanged on every call. Never invent or modify.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "org_id",
         "mcp_context_token"
       ],
       "$schema": "http://json-schema.org/draft-07/schema#"

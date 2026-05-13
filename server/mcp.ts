@@ -79,6 +79,27 @@ function createMcpServer() {
     }
   );
 
+  // --- TOOL: list_contacts ---
+  tool(server,
+    "list_contacts",
+    "List the most recent CRM contacts, including IDs. Use this before deleting the latest contact or when the user asks for recent contacts.",
+    {
+      org_id: z.string().describe("The organization ID"),
+      limit: z.number().int().min(1).max(50).optional().describe("Maximum contacts to return, default 10"),
+    },
+    async ({ org_id, limit }) => {
+      const { data, error } = await getCtx().db
+        .from("contacts")
+        .select("id, first_name, last_name, email, phone, company, stage, created_at")
+        .eq("org_id", org_id)
+        .order("created_at", { ascending: false })
+        .limit(limit ?? 10);
+
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
   // --- TOOL: create_contact ---
   tool(server,
     "create_contact",
@@ -116,6 +137,64 @@ function createMcpServer() {
 
       if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
       return { content: [{ type: "text" as const, text: `Contact created: ${JSON.stringify(data)}` }] };
+    }
+  );
+
+  // --- TOOL: delete_contact ---
+  tool(server,
+    "delete_contact",
+    "Delete a contact by ID from the CRM. Only use this after the user explicitly asks to delete a contact.",
+    {
+      org_id: z.string().describe("The organization ID"),
+      contact_id: z.number().int().positive().describe("The contact ID to delete"),
+    },
+    async ({ org_id, contact_id }) => {
+      const { data: contact, error: fetchError } = await getCtx().db
+        .from("contacts")
+        .select("id, first_name, last_name, email, phone, created_at")
+        .eq("org_id", org_id)
+        .eq("id", contact_id)
+        .single();
+
+      if (fetchError) return { content: [{ type: "text" as const, text: `Error: ${fetchError.message}` }] };
+
+      const { error } = await getCtx().db
+        .from("contacts")
+        .delete()
+        .eq("org_id", org_id)
+        .eq("id", contact_id);
+
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+      return { content: [{ type: "text" as const, text: `Deleted contact: ${JSON.stringify(contact)}` }] };
+    }
+  );
+
+  // --- TOOL: delete_latest_contact ---
+  tool(server,
+    "delete_latest_contact",
+    "Delete the most recently created contact in the CRM. Only use this when the user explicitly asks to delete the latest/newest contact.",
+    {
+      org_id: z.string().describe("The organization ID"),
+    },
+    async ({ org_id }) => {
+      const { data: contact, error: fetchError } = await getCtx().db
+        .from("contacts")
+        .select("id, first_name, last_name, email, phone, created_at")
+        .eq("org_id", org_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (fetchError) return { content: [{ type: "text" as const, text: `Error: ${fetchError.message}` }] };
+
+      const { error } = await getCtx().db
+        .from("contacts")
+        .delete()
+        .eq("org_id", org_id)
+        .eq("id", contact.id);
+
+      if (error) return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+      return { content: [{ type: "text" as const, text: `Deleted latest contact: ${JSON.stringify(contact)}` }] };
     }
   );
 

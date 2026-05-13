@@ -25,7 +25,10 @@
     "tools": [
       "search_contacts",
       "get_contact",
+      "list_contacts",
       "create_contact",
+      "delete_contact",
+      "delete_latest_contact",
       "update_contact_stage",
       "add_note",
       "create_task",
