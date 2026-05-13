@@ -148,6 +148,7 @@ export async function chatWithOpenClaw(
     ENV.openclawUrl
       .replace(/^https:\/\//, "wss://")
       .replace(/^http:\/\//, "ws://") + "/rpc";
+  const sessionKey = `e3c-${context.userId.slice(0, 8)}-${crypto.randomUUID()}`;
 
   return new Promise<string>((resolve, reject) => {
     const ws = new WebSocket(wsUrl, ["rpc"]);
@@ -213,7 +214,7 @@ export async function chatWithOpenClaw(
               type: "req",
               id: "sub-1",
               method: "sessions.messages.subscribe",
-              params: { key: "default" },
+              params: { key: sessionKey },
             })
           );
           ws.send(
@@ -222,7 +223,7 @@ export async function chatWithOpenClaw(
               id: "chat-1",
               method: "chat.send",
               params: {
-                sessionKey: "default",
+                sessionKey,
                 message: messageContent,
                 idempotencyKey: crypto.randomUUID(),
               },
