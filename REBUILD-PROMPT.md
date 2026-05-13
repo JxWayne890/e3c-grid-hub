@@ -748,7 +748,7 @@ This script patches OpenClaw's config to register our MCP endpoint under `mcp.se
 
 The script reads `MCP_SHARED_SECRET` from local `.env` and aborts if missing or under 32 chars. Run with `pnpm tsx scripts/register-mcp-with-openclaw.ts` after the API server is deployed and reachable at the registered MCP_URL.
 
-Grant the internal MCP tool namespace through `tools.alsoAllow: ["bundle-mcp"]`. Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, `bundle-mcp` is an internal tool namespace/profile behavior, not an installable plugin. Restart the OpenClaw container after registration so the embedded agent reloads the MCP registry.
+Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, it is not an installable plugin. Restart the OpenClaw container after registration so the embedded agent reloads the MCP registry. If configured MCP does not surface tools in the agent, install the direct `e3c-crm` OpenClaw plugin bridge with `bash scripts/install-openclaw-crm-plugin.sh`.
 
 ### Step 5.10 — Wire chat UI into the layout
 Create `client/src/components/AIChatBox.tsx` (presentational) and `client/src/components/FloatingAIChat.tsx` (floating bubble + panel). Mount `<FloatingAIChat />` once in `CrmLayout` **outside** the routed `<Switch>` so the chat persists across navigation (state survives because the layout doesn't unmount). Tier-gate inside FloatingAIChat: hide the bubble entirely if `orgTier === "starter"`.
