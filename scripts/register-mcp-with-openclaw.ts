@@ -15,6 +15,7 @@ const PRIV_PEM = (process.env.OPENCLAW_DEVICE_PRIVATE_KEY || "").replace(/\\n/g,
 const DEVICE_ID = process.env.OPENCLAW_DEVICE_ID!;
 const MCP_SHARED_SECRET = process.env.MCP_SHARED_SECRET!;
 const API_URL = process.env.APP_URL || "http://localhost:3000";
+const BUNDLE_MCP_PLUGIN_ID = "bundle-mcp";
 
 if (!MCP_SHARED_SECRET || MCP_SHARED_SECRET.length < 32) {
   console.error("MCP_SHARED_SECRET missing or too short (min 32 chars). Generate with: openssl rand -hex 32");
@@ -28,6 +29,10 @@ const MCP_URL = "https://api-e3c.srv1568356.hstgr.cloud/mcp";
 console.log("Registering CRM MCP server with OpenClaw...");
 console.log(`  OpenClaw: ${OPENCLAW_URL}`);
 console.log(`  MCP URL: ${MCP_URL}`);
+
+function addUnique(values: unknown, value: string): string[] {
+  return Array.from(new Set([...(Array.isArray(values) ? values.filter((v): v is string => typeof v === "string") : []), value]));
+}
 
 const privateKey = crypto.createPrivateKey(PRIV_PEM);
 const publicKey = crypto.createPublicKey(privateKey);
@@ -84,10 +89,28 @@ ws.on("message", (data: WebSocket.Data) => {
     }
 
     const baseHash = msg.payload?.hash || msg.payload?.baseHash;
+    const currentConfig = msg.payload?.config || msg.payload || {};
     console.log(`Got config hash: ${baseHash}`);
-    console.log("Registering MCP server...");
+    console.log("Registering MCP server and enabling bundled MCP tools...");
+
+    const toolConfig = currentConfig.tools || {};
+    const pluginEntry = currentConfig.plugins?.entries?.[BUNDLE_MCP_PLUGIN_ID] || {};
 
     const configPatch = {
+      plugins: {
+        allow: addUnique(currentConfig.plugins?.allow, BUNDLE_MCP_PLUGIN_ID),
+        entries: {
+          [BUNDLE_MCP_PLUGIN_ID]: {
+            ...pluginEntry,
+            enabled: true,
+            config: pluginEntry.config || {},
+          },
+        },
+      },
+      tools: {
+        ...toolConfig,
+        alsoAllow: addUnique(toolConfig.alsoAllow, BUNDLE_MCP_PLUGIN_ID),
+      },
       mcp: {
         servers: {
           crm: {
@@ -111,6 +134,7 @@ ws.on("message", (data: WebSocket.Data) => {
       params: {
         raw: JSON.stringify(configPatch),
         baseHash,
+        restartDelayMs: 1000,
       },
     }));
   }
@@ -119,7 +143,8 @@ ws.on("message", (data: WebSocket.Data) => {
   if (msg.type === "res" && msg.id === "config-1") {
     if (msg.ok) {
       console.log("MCP server registered successfully!");
-      console.log("OpenClaw can now use CRM tools:");
+      console.log(`Enabled ${BUNDLE_MCP_PLUGIN_ID}. Restart the OpenClaw container if CRM tools are not visible yet.`);
+      console.log("Expected CRM tools:");
       console.log("  - search_contacts");
       console.log("  - get_contact");
       console.log("  - create_contact");
@@ -143,7 +168,23 @@ ws.on("message", (data: WebSocket.Data) => {
   if (msg.type === "res" && msg.id === "tools-1") {
     if (msg.ok) {
       const tools = msg.payload?.tools || [];
-      const crmTools = tools.filter((t: any) => t.name?.startsWith("crm_") || t.source === "crm");
+      const expectedToolNames = new Set([
+        "search_contacts",
+        "get_contact",
+        "create_contact",
+        "update_contact_stage",
+        "add_note",
+        "create_task",
+        "create_deal",
+        "list_tasks",
+        "get_pipeline_summary",
+      ]);
+      const crmTools = tools.filter((t: any) => (
+        expectedToolNames.has(t.name) ||
+        t.name?.startsWith("crm_") ||
+        t.source === "crm" ||
+        t.server === "crm"
+      ));
       console.log(`\nTotal tools available: ${tools.length}`);
       if (crmTools.length > 0) {
         console.log(`CRM tools found: ${crmTools.length}`);
