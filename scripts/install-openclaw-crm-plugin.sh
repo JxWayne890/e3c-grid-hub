@@ -53,10 +53,13 @@ const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const manifest = JSON.parse(fs.readFileSync(pluginPath, "utf8"));
 const toolNames = manifest.contracts?.tools || [];
 
-const withoutStale = (values) =>
+const staleToolEntries = new Set(["bundle-mcp", "e3c-crm", ...toolNames]);
+const withoutBundleMcp = (values) =>
   Array.isArray(values)
     ? values.filter((value) => value !== "bundle-mcp")
     : [];
+const withoutStaleToolEntries = (values) =>
+  withoutBundleMcp(values).filter((value) => !staleToolEntries.has(value));
 
 config.plugins ||= {};
 config.plugins.allow = Array.from(new Set([...(config.plugins.allow || []), "e3c-crm"]));
@@ -71,11 +74,11 @@ config.plugins.entries["e3c-crm"] = {
 };
 
 config.tools ||= {};
-config.tools.allow = withoutStale(config.tools.allow);
+config.tools.allow = withoutStaleToolEntries(config.tools.allow);
 config.tools.alsoAllow = Array.from(
-  new Set([...withoutStale(config.tools.alsoAllow), "e3c-crm", ...toolNames])
+  new Set([...withoutStaleToolEntries(config.tools.alsoAllow), ...toolNames])
 );
-config.tools.deny = withoutStale(config.tools.deny);
+config.tools.deny = withoutBundleMcp(config.tools.deny);
 
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 console.log(`Configured e3c-crm with ${toolNames.length} tools.`);
