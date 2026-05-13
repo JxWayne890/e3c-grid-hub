@@ -76,7 +76,7 @@ config.plugins.entries["e3c-crm"] = {
 config.tools ||= {};
 config.tools.allow = withoutStaleToolEntries(config.tools.allow);
 config.tools.alsoAllow = Array.from(
-  new Set([...withoutStaleToolEntries(config.tools.alsoAllow), ...toolNames])
+  new Set([...withoutStaleToolEntries(config.tools.alsoAllow), "e3c-crm", ...toolNames])
 );
 config.tools.deny = withoutBundleMcp(config.tools.deny);
 
