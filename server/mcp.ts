@@ -87,19 +87,25 @@ function createMcpServer() {
       org_id: z.string().describe("The organization ID"),
       first_name: z.string().describe("Contact's first name"),
       last_name: z.string().optional().describe("Contact's last name"),
-      email: z.string().describe("Contact's email address"),
+      email: z.string().optional().describe("Contact's email address"),
       phone: z.string().optional().describe("Contact's phone number"),
       company: z.string().optional().describe("Contact's company name"),
       stage: z.enum(["lead", "contacted", "qualified", "proposal", "won", "lost"]).optional().describe("Pipeline stage (default: lead)"),
     },
     async ({ org_id, first_name, last_name, email, phone, company, stage }) => {
+      const fallbackEmailSlug = [first_name, last_name || "contact"]
+        .join(".")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ".")
+        .replace(/^\.+|\.+$/g, "") || "contact";
+      const contactEmail = email || `${fallbackEmailSlug}.${Date.now()}@unknown.local`;
       const { data, error } = await getCtx().db
         .from("contacts")
         .insert({
           org_id,
           first_name,
           last_name: last_name || "",
-          email,
+          email: contactEmail,
           phone: phone || "",
           company: company || "",
           stage: stage || "lead",

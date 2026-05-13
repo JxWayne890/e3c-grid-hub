@@ -33,6 +33,69 @@ const rateLimitMap = new Map<string, number[]>();
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const RATE_LIMIT_MAX = 5;
 
+function toTitleCaseName(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((part) =>
+      part ? part[0].toUpperCase() + part.slice(1).toLowerCase() : part
+    )
+    .join(" ");
+}
+
+function placeholderContactEmail(firstName: string, lastName?: string): string {
+  const slug =
+    [firstName, lastName || "contact"]
+      .join(".")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ".")
+      .replace(/^\.+|\.+$/g, "") || "contact";
+  return `${slug}.${Date.now()}@unknown.local`;
+}
+
+function parseCreateContactCommand(content: string):
+  | {
+      firstName: string;
+      lastName: string;
+      email?: string;
+      phone?: string;
+      company?: string;
+    }
+  | null {
+  const commandMatch = content.match(
+    /^\s*(?:please\s+)?(?:create|add)\s+(?:a\s+)?(?:new\s+)?contact\b\s*[-:]?\s*(.+)$/i
+  );
+  if (!commandMatch) return null;
+
+  const details = commandMatch[1].trim();
+  const email = details.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0];
+  const phone =
+    details.match(
+      /\bphone(?:\s+(?:is|number))?\s*(?:is|:)?\s*([+()0-9][+()0-9\s.-]{6,}[0-9])\b/i
+    )?.[1]?.trim() ||
+    details.match(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/)?.[0]?.trim();
+  const company = details.match(
+    /\b(?:company|business)\s*(?:is|:)?\s*([^,.;\n]+?)(?=\s+\b(?:phone|email)\b|$)/i
+  )?.[1]?.trim();
+
+  const nameText = details
+    .split(/\b(?:phone|email|company|business)\b/i)[0]
+    .replace(email || "", "")
+    .replace(phone || "", "")
+    .replace(/\b(?:named|called|is)\b/gi, " ")
+    .replace(/[-:;,]+/g, " ")
+    .trim();
+  if (!/[a-z]/i.test(nameText)) return null;
+
+  const name = toTitleCaseName(nameText);
+  const parts = name.split(/\s+/);
+  const firstName = parts[0];
+  const lastName = parts.slice(1).join(" ");
+  if (!firstName) return null;
+
+  return { firstName, lastName, email, phone, company };
+}
+
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const timestamps = (rateLimitMap.get(ip) ?? []).filter(
@@ -1373,6 +1436,69 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ ctx, input }) => {
+        const saveReply = async (reply: string) => {
+          const allMessages = [
+            ...input.messages,
+            { role: "assistant" as const, content: reply },
+          ];
+
+          if (input.conversationId) {
+            await ctx.supabase!
+              .from("conversations")
+              .update({
+                messages: allMessages,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", input.conversationId);
+
+            return { reply, conversationId: input.conversationId };
+          }
+
+          const { data } = await ctx.supabase!
+            .from("conversations")
+            .insert({
+              org_id: ctx.user.orgId,
+              user_id: ctx.user.id,
+              title:
+                input.messages[0]?.content.slice(0, 100) || "New conversation",
+              messages: allMessages,
+            })
+            .select("id")
+            .single();
+
+          return { reply, conversationId: data?.id };
+        };
+
+        const lastUserMessage =
+          input.messages.filter((m) => m.role === "user").at(-1)?.content || "";
+        const contactCommand = parseCreateContactCommand(lastUserMessage);
+        if (contactCommand) {
+          const email =
+            contactCommand.email ||
+            placeholderContactEmail(
+              contactCommand.firstName,
+              contactCommand.lastName
+            );
+          const contact = await createContact(ctx.supabase!, {
+            org_id: ctx.user.orgId!,
+            first_name: contactCommand.firstName,
+            last_name: contactCommand.lastName,
+            email,
+            phone: contactCommand.phone,
+            company: contactCommand.company,
+            source: "manual",
+            stage: "lead",
+          });
+
+          const placeholderNote = contactCommand.email
+            ? ""
+            : ` I used a placeholder email (${email}) because no email was provided.`;
+          return saveReply(
+            `Created contact ${contact.first_name} ${contact.last_name || ""}`.trim() +
+              `${contact.phone ? ` with phone ${contact.phone}` : ""}.${placeholderNote}`
+          );
+        }
+
         // Fetch live business data for context — query the contacts table (real CRM data)
         const [contactsRes, notesRes, memberRes] = await Promise.all([
           ctx.supabase!.from("contacts")
@@ -1417,37 +1543,7 @@ export const appRouter = router({
             totalNotes: notesRes.count ?? 0,
           },
         });
-
-        const allMessages = [
-          ...input.messages,
-          { role: "assistant" as const, content: reply },
-        ];
-
-        if (input.conversationId) {
-          await ctx.supabase!
-            .from("conversations")
-            .update({
-              messages: allMessages,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", input.conversationId);
-
-          return { reply, conversationId: input.conversationId };
-        } else {
-          const { data } = await ctx.supabase!
-            .from("conversations")
-            .insert({
-              org_id: ctx.user.orgId,
-              user_id: ctx.user.id,
-              title:
-                input.messages[0]?.content.slice(0, 100) || "New conversation",
-              messages: allMessages,
-            })
-            .select("id")
-            .single();
-
-          return { reply, conversationId: data?.id };
-        }
+        return saveReply(reply);
       }),
 
     conversations: orgProcedure.query(async ({ ctx }) => {
