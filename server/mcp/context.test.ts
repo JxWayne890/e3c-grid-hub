@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mintContextToken, verifyContextToken } from "./context";
+import {
+  getContextAccessToken,
+  mintContextToken,
+  verifyContextToken,
+} from "./context";
 
 const ORIG_KEY = process.env.MCP_CONTEXT_SIGNING_KEY;
 
@@ -13,19 +17,22 @@ afterAll(() => {
 
 describe("context token", () => {
   it("round-trips a valid token", () => {
-    const token = mintContextToken("org-1", "user-1");
+    const token = mintContextToken("org-1", "user-1", "access-token-1");
     const claims = verifyContextToken(token);
     expect(claims).not.toBeNull();
     expect(claims!.org_id).toBe("org-1");
     expect(claims!.user_id).toBe("user-1");
+    expect(claims!.sid).toEqual(expect.any(String));
     expect(claims!.exp).toBeGreaterThan(claims!.iat);
+    expect(getContextAccessToken(claims!)).toBe("access-token-1");
+    expect(token).not.toContain("access-token-1");
   });
 
   it("rejects a tampered payload", () => {
-    const token = mintContextToken("org-1", "user-1");
+    const token = mintContextToken("org-1", "user-1", "access-token-1");
     const [payloadB64, sigB64] = token.split(".");
     const tamperedPayload = Buffer.from(
-      JSON.stringify({ org_id: "OTHER-ORG", user_id: "user-1", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300 })
+      JSON.stringify({ org_id: "OTHER-ORG", user_id: "user-1", sid: "sid-1", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300 })
     ).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
     const forged = `${tamperedPayload}.${sigB64}`;
     expect(verifyContextToken(forged)).toBeNull();
@@ -34,7 +41,7 @@ describe("context token", () => {
   });
 
   it("rejects a token signed with a different key", () => {
-    const token = mintContextToken("org-1", "user-1");
+    const token = mintContextToken("org-1", "user-1", "access-token-1");
     process.env.MCP_CONTEXT_SIGNING_KEY = "b".repeat(64);
     expect(verifyContextToken(token)).toBeNull();
     process.env.MCP_CONTEXT_SIGNING_KEY = "a".repeat(64);
@@ -44,7 +51,7 @@ describe("context token", () => {
     // Build a token with exp in the past by mocking Date.now temporarily
     const realNow = Date.now;
     Date.now = () => (realNow() - 10 * 60 * 1000); // 10 min ago
-    const token = mintContextToken("org-1", "user-1");
+    const token = mintContextToken("org-1", "user-1", "access-token-1");
     Date.now = realNow;
     expect(verifyContextToken(token)).toBeNull();
   });
@@ -59,7 +66,7 @@ describe("context token", () => {
   });
 
   it("rejects a signature of the right length but wrong value", () => {
-    const token = mintContextToken("org-1", "user-1");
+    const token = mintContextToken("org-1", "user-1", "access-token-1");
     const [payloadB64] = token.split(".");
     // 32 zero bytes base64url-encoded
     const fakeSig = Buffer.alloc(32).toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");

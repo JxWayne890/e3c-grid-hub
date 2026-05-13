@@ -26,8 +26,9 @@ import { simulateEmailSend, simulateSmsBlast, simulateSingleSms } from "./lib/si
 // Each tool call runs through the tool() wrapper in ./mcp/wrapper, which:
 //   - Verifies the mcp_context_token (HMAC) and rejects unauthenticated calls.
 //   - Builds a per-call ctx with org_id, user_id, and a Supabase client scoped
-//     to a freshly-minted user JWT — so RLS enforces org isolation even if the
-//     LLM passes a wrong org_id.
+//     to the authenticated user's Supabase access token, kept server-side behind
+//     the context token sid — so RLS enforces org isolation even if the LLM
+//     passes a wrong org_id.
 //   - Writes audit rows to agent_actions.
 // Tool handlers access the per-call client via getCtx().db.
 
@@ -2467,8 +2468,9 @@ function authorizeMcp(req: Request, res: Response): boolean {
  *   - x-mcp-secret header required on every request (Patch 1).
  *   - Tool calls additionally require a verified mcp_context_token in args
  *     (Patch 2, enforced by the tool() wrapper).
- *   - DB access uses a per-user Supabase JWT, so RLS enforces org isolation
- *     even if the LLM passes a wrong org_id (Patch 3).
+ *   - DB access uses the user's real Supabase access token resolved server-side,
+ *     so RLS enforces org isolation even if the LLM passes a wrong org_id
+ *     (Patch 3).
  */
 export function registerMcpEndpoint(app: Express) {
   // Each session gets its own McpServer + Transport pair

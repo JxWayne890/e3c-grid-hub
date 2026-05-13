@@ -24,7 +24,6 @@ export const ENV = {
   supabaseUrl: required("SUPABASE_URL"),
   supabaseAnonKey: required("SUPABASE_ANON_KEY"),
   supabaseServiceRoleKey: required("SUPABASE_SERVICE_ROLE_KEY"),
-  supabaseJwtSecret: requiredMinLength("SUPABASE_JWT_SECRET", 32),
   resendApiKey: optional("RESEND_API_KEY"),
   openclawUrl: optional("OPENCLAW_URL"),
   openclawToken: optional("OPENCLAW_GATEWAY_TOKEN"),

@@ -1,8 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { supabaseAdmin, createRequestClient } from "../supabase";
-import { verifyContextToken, mcpCtxStore, type ToolCtx } from "./context";
-import { mintSupabaseUserJwt } from "./jwt";
+import {
+  getContextAccessToken,
+  verifyContextToken,
+  mcpCtxStore,
+  type ToolCtx,
+} from "./context";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }> };
 
@@ -74,11 +78,17 @@ export function tool<S extends z.ZodRawShape>(
         );
       }
 
-      const userJwt = mintSupabaseUserJwt(claims.user_id);
+      const accessToken = getContextAccessToken(claims);
+      if (!accessToken) {
+        return deny(
+          "Error: expired CRM tool session. Please retry the chat so the server can create a fresh verified CRM session."
+        );
+      }
+
       const ctx: ToolCtx = {
         org_id: claims.org_id,
         user_id: claims.user_id,
-        db: createRequestClient(userJwt),
+        db: createRequestClient(accessToken),
       };
 
       const llmOrgId = rawArgs.org_id;

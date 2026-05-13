@@ -132,9 +132,6 @@ OPENCLAW_DEVICE_ID=your-app-prod-001
 APP_URL=https://api-yourapp.<host>.hstgr.cloud   # public URL of YOUR API server
 
 # --- MCP security (see Phase 6 for what these protect) ---
-# Supabase JWT secret — Project Settings → API → JWT Settings. Used to mint
-# per-user JWTs so MCP tools talk to Supabase under RLS instead of service role.
-SUPABASE_JWT_SECRET=<from Supabase dashboard>
 # Shared secret OpenClaw sends as x-mcp-secret on every MCP request.
 MCP_SHARED_SECRET=<openssl rand -hex 32>
 # HMAC key for the per-chat context token embedded in system prompts.
@@ -147,7 +144,7 @@ openssl rand -hex 32   # MCP_SHARED_SECRET
 openssl rand -hex 32   # MCP_CONTEXT_SIGNING_KEY  (use a DIFFERENT value)
 ```
 
-Add the same vars to `.env.example` (with placeholder values) and to your env validator (e.g. `server/_core/env.ts`). The two MCP secrets and `SUPABASE_JWT_SECRET` should be `requiredMinLength(..., 32)` — the app should refuse to start without them in production.
+Add the same vars to `.env.example` (with placeholder values) and to your env validator (e.g. `server/_core/env.ts`). The two MCP secrets should be `requiredMinLength(..., 32)` — the app should refuse to start without them in production.
 
 ---
 
@@ -184,8 +181,8 @@ OpenClaw can only do useful work if your app exposes MCP tools it can call. **Th
 | Layer | What it does | Where |
 |-------|--------------|-------|
 | **1. Shared secret** | Rejects any MCP request without `x-mcp-secret` header. Stops random internet hosts from calling /mcp at all. | Express middleware in `server/mcp.ts` |
-| **2. Context token** | Per-chat HMAC-signed token containing `{org_id, user_id, exp}`. The wrapper verifies it on every tool call and uses the verified org_id, ignoring whatever the LLM passed. | `server/mcp/context.ts`, `server/mcp/wrapper.ts` |
-| **3. Per-user Supabase JWT** | Tools call Supabase using a freshly minted user JWT. RLS enforces org isolation at the DB layer — even if layers 1 and 2 ever fail, cross-tenant queries return zero rows. | `server/mcp/jwt.ts`, `server/supabase.ts::createRequestClient` |
+| **2. Context token** | Per-chat HMAC-signed token containing `{org_id, user_id, sid, exp}`. The wrapper verifies it on every tool call and uses the verified org_id, ignoring whatever the LLM passed. | `server/mcp/context.ts`, `server/mcp/wrapper.ts` |
+| **3. Per-user Supabase access token** | Tools call Supabase using the user's real access token from the chat request, stored server-side behind `sid`. RLS enforces org isolation without exposing credentials to OpenClaw. | `server/mcp/context.ts`, `server/supabase.ts::createRequestClient` |
 
 Plus an **audit log** (`agent_actions` table) — every tool call writes a before/after row with verified org_id, user_id, args, and result summary.
 
@@ -194,7 +191,6 @@ Plus an **audit log** (`agent_actions` table) — every tool call writes a befor
 Copy these from this repo as your starting point:
 
 - `server/mcp/context.ts` — `mintContextToken()`, `verifyContextToken()`, `mcpCtxStore` (AsyncLocalStorage), `getCtx()`
-- `server/mcp/jwt.ts` — `mintSupabaseUserJwt(userId)` (HS256, 5 min TTL)
 - `server/mcp/wrapper.ts` — `tool(server, name, desc, schema, handler)` — the security boundary
 
 ### 6b — Tool definitions in server/mcp.ts
@@ -595,10 +591,10 @@ The `x-mcp-secret` header didn't match `MCP_SHARED_SECRET` on the API server (or
 The agent didn't pass `mcp_context_token` in the tool args, or the token expired (5 min TTL), or `MCP_CONTEXT_SIGNING_KEY` differs between the API server and what was used to mint. Check the agent's last attempted call in the OpenClaw UI's tool log — if the param is missing, the system prompt isn't reaching the LLM correctly.
 
 **RLS returns zero rows but the data exists**
-The Supabase user JWT's `sub` claim doesn't map to a row in `org_members`. Verify:
-- `SUPABASE_JWT_SECRET` matches your Supabase project's JWT secret (Project Settings → API → JWT Settings)
-- The user actually belongs to the org: `SELECT * FROM org_members WHERE user_id = '<sub claim>'`
+The Supabase access token used for the chat belongs to a user that cannot see those rows. Verify:
+- The user actually belongs to the org: `SELECT * FROM org_members WHERE user_id = '<auth.uid()>'`
 - The `user_org_ids()` SQL function exists and is `SECURITY DEFINER STABLE`
+- The MCP context token was minted by the same API process that receives the MCP call; if the API restarted, retry the chat to create a fresh server-side tool session
 
 **`[mcp] org_id MISMATCH` warnings in logs**
 This is **expected** when the LLM is confused or being prompt-injected — it's the security layer doing its job. Check `agent_actions.tool_args_json` to see what org_id the LLM tried to pass; investigate the source content if it looks injected.
@@ -612,7 +608,6 @@ This is **expected** when the LLM is confused or being prompt-injected — it's 
 | `server/openclaw.ts`                              | WebSocket client + system prompt + context token mint   |
 | `server/mcp.ts`                                   | MCP tool definitions + auth middleware                  |
 | `server/mcp/context.ts`                           | Context token mint/verify, AsyncLocalStorage ctx        |
-| `server/mcp/jwt.ts`                               | Per-user Supabase JWT minter                            |
 | `server/mcp/wrapper.ts`                           | `tool()` wrapper — security boundary + audit logging    |
 | `server/_core/env.ts`                             | Env var validation                                      |
 | `scripts/register-mcp-with-openclaw.ts`           | One-time MCP registration with x-mcp-secret header      |

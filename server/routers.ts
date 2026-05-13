@@ -1405,6 +1405,7 @@ export const appRouter = router({
           orgTier: ctx.user.orgTier!,
           userId: ctx.user.id,
           userName: ctx.user.fullName || ctx.user.email,
+          accessToken: ctx.accessToken!,
           business: {
             totalSignups: totalSignups ?? 0,
             recentSignups: recentSignups as any[],

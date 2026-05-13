@@ -24,6 +24,7 @@ export type OpenClawContext = {
   orgTier: string;
   userId: string;
   userName: string;
+  accessToken: string;
   business?: BusinessContext;
 };
 
@@ -129,10 +130,14 @@ export async function chatWithOpenClaw(
   }
 
   // Mint a short-lived (5 min) HMAC-signed context token. The LLM is told to
-  // pass this back as mcp_context_token on every tool call. The MCP wrapper
-  // verifies it server-side and ignores any LLM-supplied org_id, so prompt
-  // injection cannot escape the user's tenant.
-  const contextToken = mintContextToken(context.orgId, context.userId);
+  // pass this back as mcp_context_token on every tool call. The wrapper verifies
+  // it server-side and resolves the real Supabase user token from server memory.
+  // The access token is never embedded in the prompt or sent to OpenClaw.
+  const contextToken = mintContextToken(
+    context.orgId,
+    context.userId,
+    context.accessToken
+  );
   const systemPrompt = buildSystemPrompt(context, contextToken);
 
   // Build the user message with system context prepended

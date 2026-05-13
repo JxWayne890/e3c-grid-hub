@@ -29,7 +29,6 @@ This app is a CRM + marketing site for the "Grid Worker Movement" — a referral
 SUPABASE_URL=https://npfqmdnniokrlgterwnp.supabase.co
 SUPABASE_ANON_KEY=sb_publishable_T6i3jEja0MTrnxhjfIE8wg_YiW9CTK4
 SUPABASE_SERVICE_ROLE_KEY=<ASK ME FOR THIS — DO NOT PROCEED WITHOUT IT>
-SUPABASE_JWT_SECRET=<ASK ME — Supabase Dashboard → API → JWT Settings → Legacy JWT Secret>
 VITE_SUPABASE_URL=https://npfqmdnniokrlgterwnp.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_T6i3jEja0MTrnxhjfIE8wg_YiW9CTK4
 RESEND_API_KEY=re_jdGaKWh4_FxjcUyJiwkfc81bXbNtdqTk1
@@ -58,7 +57,7 @@ Browser -> Vercel (React + tRPC) -> WebSocket -> OpenClaw VPS
                                                       v  HTTP /mcp (CRM tools)
                                                 Hostinger /docker/e3c-api
                                                       |
-                                                      v  Supabase under per-user JWT (RLS enforced)
+                                                      v  Supabase under user's access token (RLS enforced)
 ```
 
 Multi-tenancy model — defense in depth (DO NOT skip any layer):
@@ -67,7 +66,7 @@ Multi-tenancy model — defense in depth (DO NOT skip any layer):
 - RLS policies enforce: `org_id IN (SELECT user_org_ids())` where `user_org_ids()` returns orgs for `auth.uid()`
 - The `/mcp` endpoint requires an `x-mcp-secret` header (Patch 1) — internet randoms can't call it
 - Every tool call requires an HMAC-signed `mcp_context_token` minted server-side per chat (Patch 2) — the wrapper IGNORES any `org_id` the LLM passes and uses the verified one from the token
-- Tool DB calls run under a freshly-minted Supabase user JWT (Patch 3) — RLS enforces org isolation at the DB layer; even if Patches 1-2 are bypassed, cross-tenant queries return zero rows
+- Tool DB calls run under the real Supabase user access token from the chat request (Patch 3), stored server-side behind the MCP context token `sid` — RLS enforces org isolation at the DB layer without exposing credentials to OpenClaw
 - Every tool call writes a row to `agent_actions` (audit log) with the verified org_id, user_id, tool name, args, and result summary
 - **Why three layers?** A prompt injection in agent-readable content (notes, emails, SMS bodies) could try to flip `org_id` mid-call. Each layer is independent — defeating one doesn't grant cross-tenant access.
 
@@ -93,7 +92,6 @@ Replace the current file entirely. The current version silently defaults every e
   - `supabaseUrl` — required
   - `supabaseAnonKey` — required
   - `supabaseServiceRoleKey` — required
-  - `supabaseJwtSecret` — `requiredMinLength("SUPABASE_JWT_SECRET", 32)` — used to mint per-user JWTs for RLS-scoped Supabase calls from MCP tools
   - `resendApiKey` — optional
   - `openclawUrl` — optional (empty until configured)
   - `openclawToken` — optional (empty until configured)
@@ -688,13 +686,13 @@ Submit a beta signup — both the owner and the user should receive emails. Crea
 ### Step 5.1 — Add deps
 - `ws` and `@types/ws` (WebSocket client)
 - `@modelcontextprotocol/sdk` (MCP server)
-- No JWT lib needed — minted manually with `node:crypto`
+- No JWT lib needed — MCP context tokens are signed manually with `node:crypto`
 
 ### Step 5.2 — Create `server/openclaw.ts`
 WebSocket client. Five-stage protocol: connect → respond to `connect.challenge` with Ed25519 signature → `sessions.messages.subscribe` + `chat.send` → collect streaming `agent` events → finalize on `chat` event with `state: "final"`. **Critical:**
 - `minProtocol: 3, maxProtocol: 3`, `role: "operator"` with `operator.pairing` in scopes
 - 60s timeout (websockets can stall silently)
-- `chatWithOpenClaw()` takes a `OpenClawContext` ({orgId, orgName, orgTier, userId, userName, business})
+- `chatWithOpenClaw()` takes a `OpenClawContext` ({orgId, orgName, orgTier, userId, userName, accessToken, business})
 - **Mints a per-chat context token** (`mintContextToken` from `./mcp/context`) and embeds it in the system prompt with explicit instructions to pass it as `mcp_context_token` on every tool call, never modify, never invent
 - System prompt also tells the agent: `org_id` and `user_id` are kept in tool schemas for reasoning, but the server overrides them with the verified values from the context token
 - Tier gate: throw FORBIDDEN if `orgTier === "starter"`
@@ -703,12 +701,13 @@ Use the implementation in this repo's `server/openclaw.ts` as the canonical sour
 
 ### Step 5.3 — Create `server/mcp/context.ts`
 HMAC-signed context token with 5-min TTL.
-- `mintContextToken(orgId, userId)` — base64url(JSON({org_id, user_id, iat, exp})) + base64url(HMAC-SHA256(MCP_CONTEXT_SIGNING_KEY, payload))
-- `verifyContextToken(token)` — returns `{org_id, user_id, iat, exp}` or `null`. Uses `crypto.timingSafeEqual` for the signature compare. Rejects expired (`exp < now`), future-dated (`iat > now + 60`), malformed, or wrong-length signatures.
+- `mintContextToken(orgId, userId, accessToken)` — stores the Supabase access token server-side behind a random `sid`, then returns base64url(JSON({org_id, user_id, sid, iat, exp})) + base64url(HMAC-SHA256(MCP_CONTEXT_SIGNING_KEY, payload))
+- `verifyContextToken(token)` — returns `{org_id, user_id, sid, iat, exp}` or `null`. Uses `crypto.timingSafeEqual` for the signature compare. Rejects expired (`exp < now`), future-dated (`iat > now + 60`), malformed, or wrong-length signatures.
+- `getContextAccessToken(claims)` — resolves the real Supabase access token from server memory; retry the chat if the API process restarted or the 5-minute session expired.
 - `mcpCtxStore` — `AsyncLocalStorage<ToolCtx>` so handlers can call `getCtx()` to retrieve `{org_id, user_id, db}` set by the wrapper.
 
-### Step 5.4 — Create `server/mcp/jwt.ts`
-Mints a Supabase user JWT (HS256, 5-min TTL) using `SUPABASE_JWT_SECRET`. Required claims: `iss: "supabase"`, `sub: userId`, `aud: "authenticated"`, `role: "authenticated"`, `iat`, `exp`. Built manually with `node:crypto.createHmac` — no JWT library needed.
+### Step 5.4 — Use the real Supabase access token
+Do not mint a replacement Supabase JWT. Supabase projects can use asymmetric signing keys, and forged HS256 tokens will fail with PostgREST key errors. The MCP wrapper should call `createRequestClient()` with the access token resolved by `getContextAccessToken(claims)` so normal RLS applies.
 
 ### Step 5.5 — Create `server/mcp/wrapper.ts` — THE SECURITY BOUNDARY
 Exports `tool(server, name, description, schema, handler)`. Replaces every direct `server.tool(...)` call.
@@ -716,11 +715,12 @@ Exports `tool(server, name, description, schema, handler)`. Replaces every direc
 For each call:
 1. Inject `mcp_context_token: z.string()` into the schema (always required, never optional).
 2. Verify the token with `verifyContextToken`. If null → return `{ content: [{ type: "text", text: "Error: missing or invalid session context token..." }] }` immediately.
-3. Build `ctx = { org_id, user_id, db: createRequestClient(mintSupabaseUserJwt(user_id)) }`. The `db` client is a per-request Supabase client scoped to a freshly minted user JWT, so RLS enforces org isolation.
-4. **Override** `args.org_id` and `args.user_id` with the verified values from the token. If the LLM-supplied values differ, log `[mcp] org_id MISMATCH in <toolName>: llm='X' verified='Y' user=<id>` (signal of prompt injection — useful for forensics).
-5. Insert audit row: `agent_actions { org_id, user_id, tool_name, tool_args_json, status: 'started' }` via `supabaseAdmin` (so it always succeeds regardless of RLS), capture the row id.
-6. Run handler inside `mcpCtxStore.run(ctx, () => handler(safeArgs))`. Handlers access `ctx` via `getCtx()`.
-7. After handler resolves: update audit row to `status: 'success'` + `tool_result_summary` (first 500 chars of result text). On thrown error: status='error' + the error message. Return a deny result instead of throwing.
+3. Resolve the server-side Supabase access token with `getContextAccessToken(claims)`. If it is missing or expired, return an error asking the user to retry the chat.
+4. Build `ctx = { org_id, user_id, db: createRequestClient(accessToken) }`. The `db` client is a per-request Supabase client scoped to the authenticated user, so RLS enforces org isolation.
+5. **Override** `args.org_id` and `args.user_id` with the verified values from the token. If the LLM-supplied values differ, log `[mcp] org_id MISMATCH in <toolName>: llm='X' verified='Y' user=<id>` (signal of prompt injection — useful for forensics).
+6. Insert audit row: `agent_actions { org_id, user_id, tool_name, tool_args_json, status: 'started' }` via `supabaseAdmin` (so it always succeeds regardless of RLS), capture the row id.
+7. Run handler inside `mcpCtxStore.run(ctx, () => handler(safeArgs))`. Handlers access `ctx` via `getCtx()`.
+8. After handler resolves: update audit row to `status: 'success'` + `tool_result_summary` (first 500 chars of result text). On thrown error: status='error' + the error message. Return a deny result instead of throwing.
 
 ### Step 5.6 — Create `server/mcp.ts`
 - Use `tool(server, ...)` from the wrapper, NOT raw `server.tool()`. This is the WHOLE POINT — every tool goes through the security boundary.

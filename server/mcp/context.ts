@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type MCPContextClaims = {
   org_id: string;
   user_id: string;
+  sid: string;
   iat: number;
   exp: number;
 };
@@ -16,6 +17,15 @@ export type ToolCtx = {
 };
 
 const TTL_SECONDS = 5 * 60;
+
+type ContextSession = {
+  org_id: string;
+  user_id: string;
+  access_token: string;
+  exp: number;
+};
+
+const contextSessions = new Map<string, ContextSession>();
 
 function b64url(buf: Buffer | string): string {
   const s = (typeof buf === "string" ? Buffer.from(buf) : buf).toString("base64");
@@ -35,20 +45,39 @@ function getSigningKey(): string {
   return key;
 }
 
+function pruneExpiredSessions(now = Math.floor(Date.now() / 1000)): void {
+  contextSessions.forEach((session, sid) => {
+    if (session.exp < now) contextSessions.delete(sid);
+  });
+}
+
 /**
- * Mint a short-lived (5 min) HMAC-signed context token carrying {org_id, user_id}.
- * The token is embedded in the chat message and required as `mcp_context_token`
- * on every tool call. The MCP wrapper verifies it server-side; tools never trust
- * org_id supplied by the LLM.
+ * Mint a short-lived (5 min) HMAC-signed context token carrying
+ * {org_id, user_id, sid}. The LLM sees only this signed token. The user's real
+ * Supabase access token is kept in this process, keyed by sid, so MCP tools can
+ * use normal Supabase RLS without exposing credentials to OpenClaw.
  */
-export function mintContextToken(orgId: string, userId: string): string {
+export function mintContextToken(
+  orgId: string,
+  userId: string,
+  accessToken: string
+): string {
   const now = Math.floor(Date.now() / 1000);
+  pruneExpiredSessions(now);
+  const sid = crypto.randomUUID();
   const claims: MCPContextClaims = {
     org_id: orgId,
     user_id: userId,
+    sid,
     iat: now,
     exp: now + TTL_SECONDS,
   };
+  contextSessions.set(sid, {
+    org_id: orgId,
+    user_id: userId,
+    access_token: accessToken,
+    exp: claims.exp,
+  });
   const payloadB64 = b64url(JSON.stringify(claims));
   const sig = crypto
     .createHmac("sha256", getSigningKey())
@@ -92,8 +121,26 @@ export function verifyContextToken(token: unknown): MCPContextClaims | null {
   if (typeof claims.iat !== "number" || claims.iat > now + 60) return null;
   if (typeof claims.org_id !== "string" || !claims.org_id) return null;
   if (typeof claims.user_id !== "string" || !claims.user_id) return null;
+  if (typeof claims.sid !== "string" || !claims.sid) return null;
 
   return claims;
+}
+
+export function getContextAccessToken(
+  claims: MCPContextClaims
+): string | null {
+  const now = Math.floor(Date.now() / 1000);
+  pruneExpiredSessions(now);
+  const session = contextSessions.get(claims.sid);
+  if (!session) return null;
+  if (session.exp < now) {
+    contextSessions.delete(claims.sid);
+    return null;
+  }
+  if (session.org_id !== claims.org_id || session.user_id !== claims.user_id) {
+    return null;
+  }
+  return session.access_token;
 }
 
 /**

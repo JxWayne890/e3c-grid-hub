@@ -4,6 +4,7 @@ import { supabaseAdmin, createRequestClient } from "../supabase";
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
+  accessToken: string | null;
   user: {
     id: string;
     email: string;
@@ -22,7 +23,7 @@ export async function createContext(
   const authHeader = opts.req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return { req: opts.req, res: opts.res, user: null, supabase: null };
+    return { req: opts.req, res: opts.res, accessToken: null, user: null, supabase: null };
   }
 
   const token = authHeader.slice(7);
@@ -31,7 +32,7 @@ export async function createContext(
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error || !user) {
-      return { req: opts.req, res: opts.res, user: null, supabase: null };
+      return { req: opts.req, res: opts.res, accessToken: null, user: null, supabase: null };
     }
 
     // Look up org membership (including member's name)
@@ -54,6 +55,7 @@ export async function createContext(
     return {
       req: opts.req,
       res: opts.res,
+      accessToken: token,
       user: {
         id: user.id,
         email: user.email ?? "",
@@ -66,6 +68,6 @@ export async function createContext(
       supabase,
     };
   } catch {
-    return { req: opts.req, res: opts.res, user: null, supabase: null };
+    return { req: opts.req, res: opts.res, accessToken: null, user: null, supabase: null };
   }
 }
