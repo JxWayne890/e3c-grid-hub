@@ -409,7 +409,7 @@ Use `scripts/register-mcp-with-openclaw.ts` from this repo as the template. Edit
 const MCP_URL = "https://api-yourapp.<host>.hstgr.cloud/mcp";
 ```
 
-The script registers the MCP server config with **`headers: { "x-mcp-secret": MCP_SHARED_SECRET }`** so OpenClaw includes the shared secret on every MCP call. It also enables the bundled MCP adapter with `plugins.allow`, `plugins.entries["bundle-mcp"]`, and `tools.alsoAllow`. Make sure `MCP_SHARED_SECRET` is in your local `.env` before running — the script aborts if it's missing or under 32 chars.
+The script registers the MCP server config under `mcp.servers.crm` with **`headers: { "x-mcp-secret": MCP_SHARED_SECRET }`** so OpenClaw includes the shared secret on every MCP call. Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, `bundle-mcp` is an internal tool namespace, not an installable plugin. Make sure `MCP_SHARED_SECRET` is in your local `.env` before running — the script aborts if it's missing or under 32 chars.
 
 Run from your local machine with the env vars set:
 
@@ -421,12 +421,12 @@ Expected output:
 ```
 Authenticated! Fetching current config...
 Got config hash: <hash>
-Registering MCP server and enabling bundled MCP tools...
+Registering CRM MCP server...
 MCP server registered successfully!
 Total tools available: N
 ```
 
-OpenClaw marks plugin enablement as restart-required. If the script reports zero CRM tools after registering, restart the OpenClaw container and re-check the tool list.
+Restart the OpenClaw container after registration so the embedded agent reloads the MCP registry. If the script reports zero CRM tools after restarting, check the OpenClaw logs for MCP transport errors.
 
 **Verify in the OpenClaw UI:** open `https://<your-openclaw-url>` → AI & Agents → Tools → your tool names should appear.
 
@@ -589,8 +589,8 @@ The `x-mcp-secret` header didn't match `MCP_SHARED_SECRET` on the API server (or
 - Re-run `pnpm tsx scripts/register-mcp-with-openclaw.ts` after rotating the secret
 - Curl test: `curl -X POST -H "x-mcp-secret: <value>" https://api-yourapp.../mcp -d '{}'` should NOT return 401
 
-**OpenClaw says "Failed to fetch" or `tools.effective` shows zero tools**
-The CRM MCP server may be configured but the bundled MCP adapter is not loaded. Re-run `pnpm tsx scripts/register-mcp-with-openclaw.ts`, then restart the OpenClaw container so `bundle-mcp` is loaded at startup.
+**OpenClaw says "Failed to fetch" or `tools.effective` shows zero CRM tools**
+The CRM MCP server may be missing from `mcp.servers`, the HTTP transport may not have loaded, or `tools.deny` may be hiding the bundled MCP namespace. Re-run `pnpm tsx scripts/register-mcp-with-openclaw.ts`, restart the OpenClaw container, and check the OpenClaw logs for `mcp`, `tool`, `transport`, `warn`, and `error` entries. If the logs say `plugin not found: bundle-mcp`, remove that stale plugin config; it should not be enabled as a plugin.
 
 **Tool returns "missing or invalid session context token"**
 The agent didn't pass `mcp_context_token` in the tool args, or the token expired (5 min TTL), or `MCP_CONTEXT_SIGNING_KEY` differs between the API server and what was used to mint. Check the agent's last attempted call in the OpenClaw UI's tool log — if the param is missing, the system prompt isn't reaching the LLM correctly.

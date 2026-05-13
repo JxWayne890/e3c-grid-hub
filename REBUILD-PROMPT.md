@@ -744,11 +744,11 @@ Create `supabase/phase14-mcp-security.sql` with the `agent_actions` table:
 Standard pattern — protected procedure that takes `{messages, conversationId?}`, calls `chatWithOpenClaw()` with the user's full org context loaded from Supabase, persists the conversation, returns `{reply, conversationId}`. Invalidates `contacts.list`, `tasks.list`, `calendar.list` on the client side after success since the AI may have created/updated rows.
 
 ### Step 5.9 — Update `scripts/register-mcp-with-openclaw.ts`
-This script patches OpenClaw's config to register our MCP endpoint and enable the bundled MCP tool adapter. **Critical:** the patch must include `headers: { "x-mcp-secret": MCP_SHARED_SECRET }` so OpenClaw sends the secret on every MCP call. Without this, every tool call returns 401 after Step 5.6 lands.
+This script patches OpenClaw's config to register our MCP endpoint under `mcp.servers.crm`. **Critical:** the patch must include `headers: { "x-mcp-secret": MCP_SHARED_SECRET }` so OpenClaw sends the secret on every MCP call. Without this, every tool call returns 401 after Step 5.6 lands.
 
 The script reads `MCP_SHARED_SECRET` from local `.env` and aborts if missing or under 32 chars. Run with `pnpm tsx scripts/register-mcp-with-openclaw.ts` after the API server is deployed and reachable at the registered MCP_URL.
 
-The script must also add `bundle-mcp` to `plugins.allow`, enable `plugins.entries["bundle-mcp"]`, and add `bundle-mcp` to `tools.alsoAllow`. OpenClaw marks plugin enablement as restart-required, so restart the OpenClaw container if `tools.effective` still returns zero CRM tools immediately after registration.
+Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, `bundle-mcp` is an internal tool namespace/profile behavior, not an installable plugin. Restart the OpenClaw container after registration so the embedded agent reloads the MCP registry.
 
 ### Step 5.10 — Wire chat UI into the layout
 Create `client/src/components/AIChatBox.tsx` (presentational) and `client/src/components/FloatingAIChat.tsx` (floating bubble + panel). Mount `<FloatingAIChat />` once in `CrmLayout` **outside** the routed `<Switch>` so the chat persists across navigation (state survives because the layout doesn't unmount). Tier-gate inside FloatingAIChat: hide the bubble entirely if `orgTier === "starter"`.

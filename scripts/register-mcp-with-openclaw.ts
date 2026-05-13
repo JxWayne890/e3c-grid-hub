@@ -14,8 +14,6 @@ const OPENCLAW_URL = process.env.OPENCLAW_URL!;
 const PRIV_PEM = (process.env.OPENCLAW_DEVICE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
 const DEVICE_ID = process.env.OPENCLAW_DEVICE_ID!;
 const MCP_SHARED_SECRET = process.env.MCP_SHARED_SECRET!;
-const API_URL = process.env.APP_URL || "http://localhost:3000";
-const BUNDLE_MCP_PLUGIN_ID = "bundle-mcp";
 
 if (!MCP_SHARED_SECRET || MCP_SHARED_SECRET.length < 32) {
   console.error("MCP_SHARED_SECRET missing or too short (min 32 chars). Generate with: openssl rand -hex 32");
@@ -30,10 +28,6 @@ console.log("Registering CRM MCP server with OpenClaw...");
 console.log(`  OpenClaw: ${OPENCLAW_URL}`);
 console.log(`  MCP URL: ${MCP_URL}`);
 
-function addUnique(values: unknown, value: string): string[] {
-  return Array.from(new Set([...(Array.isArray(values) ? values.filter((v): v is string => typeof v === "string") : []), value]));
-}
-
 const privateKey = crypto.createPrivateKey(PRIV_PEM);
 const publicKey = crypto.createPublicKey(privateKey);
 const pubKeyRaw = publicKey.export({ type: "spki", format: "der" }).subarray(-32);
@@ -41,6 +35,25 @@ const pubKeyB64 = pubKeyRaw.toString("base64");
 
 const wsUrl = OPENCLAW_URL.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://") + "/rpc";
 const ws = new WebSocket(wsUrl, ["rpc"]);
+
+function collectToolNames(payload: any): string[] {
+  const names = new Set<string>();
+  const add = (tool: any) => {
+    const name = typeof tool === "string" ? tool : tool?.name || tool?.id || tool?.key;
+    if (typeof name === "string") names.add(name);
+  };
+
+  if (Array.isArray(payload?.tools)) payload.tools.forEach(add);
+  if (Array.isArray(payload?.groups)) {
+    for (const group of payload.groups) {
+      if (Array.isArray(group?.tools)) group.tools.forEach(add);
+      if (Array.isArray(group?.items)) group.items.forEach(add);
+      if (Array.isArray(group?.toolNames)) group.toolNames.forEach(add);
+    }
+  }
+
+  return [...names].sort();
+}
 
 ws.on("message", (data: WebSocket.Data) => {
   const msg = JSON.parse(data.toString());
@@ -89,28 +102,10 @@ ws.on("message", (data: WebSocket.Data) => {
     }
 
     const baseHash = msg.payload?.hash || msg.payload?.baseHash;
-    const currentConfig = msg.payload?.config || msg.payload || {};
     console.log(`Got config hash: ${baseHash}`);
-    console.log("Registering MCP server and enabling bundled MCP tools...");
-
-    const toolConfig = currentConfig.tools || {};
-    const pluginEntry = currentConfig.plugins?.entries?.[BUNDLE_MCP_PLUGIN_ID] || {};
+    console.log("Registering CRM MCP server...");
 
     const configPatch = {
-      plugins: {
-        allow: addUnique(currentConfig.plugins?.allow, BUNDLE_MCP_PLUGIN_ID),
-        entries: {
-          [BUNDLE_MCP_PLUGIN_ID]: {
-            ...pluginEntry,
-            enabled: true,
-            config: pluginEntry.config || {},
-          },
-        },
-      },
-      tools: {
-        ...toolConfig,
-        alsoAllow: addUnique(toolConfig.alsoAllow, BUNDLE_MCP_PLUGIN_ID),
-      },
       mcp: {
         servers: {
           crm: {
@@ -143,7 +138,7 @@ ws.on("message", (data: WebSocket.Data) => {
   if (msg.type === "res" && msg.id === "config-1") {
     if (msg.ok) {
       console.log("MCP server registered successfully!");
-      console.log(`Enabled ${BUNDLE_MCP_PLUGIN_ID}. Restart the OpenClaw container if CRM tools are not visible yet.`);
+      console.log("Restart the OpenClaw container so the embedded agent reloads the MCP registry.");
       console.log("Expected CRM tools:");
       console.log("  - search_contacts");
       console.log("  - get_contact");
@@ -167,7 +162,7 @@ ws.on("message", (data: WebSocket.Data) => {
 
   if (msg.type === "res" && msg.id === "tools-1") {
     if (msg.ok) {
-      const tools = msg.payload?.tools || [];
+      const tools = collectToolNames(msg.payload);
       const expectedToolNames = new Set([
         "search_contacts",
         "get_contact",
@@ -179,16 +174,17 @@ ws.on("message", (data: WebSocket.Data) => {
         "list_tasks",
         "get_pipeline_summary",
       ]);
-      const crmTools = tools.filter((t: any) => (
-        expectedToolNames.has(t.name) ||
-        t.name?.startsWith("crm_") ||
-        t.source === "crm" ||
-        t.server === "crm"
+      const crmTools = tools.filter((name) => (
+        expectedToolNames.has(name) ||
+        name.includes("search_contacts") ||
+        name.includes("create_contact") ||
+        name.startsWith("crm.") ||
+        name.startsWith("crm_")
       ));
       console.log(`\nTotal tools available: ${tools.length}`);
       if (crmTools.length > 0) {
         console.log(`CRM tools found: ${crmTools.length}`);
-        crmTools.forEach((t: any) => console.log(`  - ${t.name}: ${t.description || ""}`));
+        crmTools.forEach((name) => console.log(`  - ${name}`));
       } else {
         console.log("CRM tools not yet visible — they may appear after OpenClaw restarts or refreshes its tool catalog.");
       }
