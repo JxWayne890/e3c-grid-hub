@@ -53,6 +53,11 @@ const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const manifest = JSON.parse(fs.readFileSync(pluginPath, "utf8"));
 const toolNames = manifest.contracts?.tools || [];
 
+const withoutStale = (values) =>
+  Array.isArray(values)
+    ? values.filter((value) => value !== "bundle-mcp")
+    : [];
+
 config.plugins ||= {};
 config.plugins.allow = Array.from(new Set([...(config.plugins.allow || []), "e3c-crm"]));
 config.plugins.entries ||= {};
@@ -66,14 +71,19 @@ config.plugins.entries["e3c-crm"] = {
 };
 
 config.tools ||= {};
+config.tools.allow = withoutStale(config.tools.allow);
 config.tools.alsoAllow = Array.from(
-  new Set([...(config.tools.alsoAllow || []), "e3c-crm", ...toolNames])
+  new Set([...withoutStale(config.tools.alsoAllow), "e3c-crm", ...toolNames])
 );
+config.tools.deny = withoutStale(config.tools.deny);
 
 fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 console.log(`Configured e3c-crm with ${toolNames.length} tools.`);
 NODE
 
 echo "Restarting OpenClaw..."
+docker restart "$OPENCLAW_CONTAINER" >/dev/null
+sleep 8
+docker exec "$OPENCLAW_CONTAINER" sh -lc "chown -R root:root '$PLUGIN_CONTAINER_DST'"
 docker restart "$OPENCLAW_CONTAINER" >/dev/null
 echo "Done. Wait 20 seconds, then test the AI action again."
