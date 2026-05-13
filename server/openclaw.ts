@@ -106,6 +106,25 @@ function authenticateWs(
   );
 }
 
+function extractTextContent(content: unknown): string {
+  if (!content) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(extractTextContent).join("");
+  }
+  if (typeof content !== "object") return "";
+
+  const value = content as Record<string, unknown>;
+  if (typeof value.text === "string") return value.text;
+  if (typeof value.content === "string" || Array.isArray(value.content)) {
+    return extractTextContent(value.content);
+  }
+  if (value.message && typeof value.message === "object") {
+    return extractTextContent((value.message as Record<string, unknown>).content);
+  }
+  return "";
+}
+
 /**
  * Send a message to OpenClaw via WebSocket JSON-RPC.
  * Protocol: connect with challenge-response → chat.send → collect streaming events.
@@ -153,6 +172,7 @@ export async function chatWithOpenClaw(
   return new Promise<string>((resolve, reject) => {
     const ws = new WebSocket(wsUrl, ["rpc"]);
     let fullText = "";
+    let sawAgentEndWithoutText = false;
     let resolved = false;
 
     const timeout = setTimeout(() => {
@@ -248,9 +268,15 @@ export async function chatWithOpenClaw(
           if (typeof delta === "string") {
             fullText = msg.payload?.data?.text || fullText + delta;
           }
+          const dataText = extractTextContent(msg.payload?.data?.content);
+          if (dataText) fullText = dataText;
           const phase = msg.payload?.data?.phase;
           if (phase === "end") {
-            finish(fullText);
+            if (fullText.trim()) {
+              finish(fullText);
+            } else {
+              sawAgentEndWithoutText = true;
+            }
           } else if (phase === "error") {
             const err = msg.payload?.data?.error;
             const errMsg =
@@ -266,14 +292,11 @@ export async function chatWithOpenClaw(
         if (msg.type === "event" && msg.event === "chat") {
           const state = msg.payload?.state;
           if (state === "final") {
-            const content = msg.payload?.message?.content;
-            if (Array.isArray(content)) {
-              const text = content
-                .filter((c: any) => c.type === "text")
-                .map((c: any) => c.text)
-                .join("");
-              if (text) finish(text);
-            }
+            const text = extractTextContent(msg.payload?.message?.content);
+            finish(text || fullText);
+          } else if (state === "delta") {
+            const text = extractTextContent(msg.payload?.message?.content);
+            if (text) fullText = text;
           } else if (state === "error") {
             const errMsg =
               msg.payload?.errorMessage ||
@@ -281,6 +304,18 @@ export async function chatWithOpenClaw(
               msg.payload?.error ||
               "The AI assistant returned an error.";
             fail(typeof errMsg === "string" ? errMsg : "The AI assistant returned an error.");
+          }
+          return;
+        }
+
+        if (msg.type === "event" && msg.event === "session.message") {
+          const role = msg.payload?.message?.role || msg.payload?.role;
+          if (role === "assistant") {
+            const text = extractTextContent(msg.payload?.message?.content);
+            if (text) {
+              fullText = text;
+              if (sawAgentEndWithoutText) finish(text);
+            }
           }
           return;
         }
@@ -342,9 +377,11 @@ WORKFLOW RULES:
 1. The CRM has real data — NEVER claim "you have no X" without first calling a tool to verify.
 2. For ANY question about specific records, counts, or analytics → call the relevant tool first, then answer.
 3. For action requests (send email, create task, schedule event, tag contact, etc.) → call the tool and DO it. Don't describe how.
-4. After a tool call, give a concise summary with specific numbers/names from the result.
-5. If a tool returns an error, say so plainly — don't fake success.
-6. Keep replies short and actionable.`;
+4. If the user asks to delete the latest/newest contact, call delete_latest_contact with org_id and mcp_context_token. Do not use delete_contact unless you already have a specific contact_id.
+5. When creating a contact from a full name, split it into first_name and last_name.
+6. After a tool call, give a concise summary with specific numbers/names from the result.
+7. If a tool returns an error, say so plainly — don't fake success.
+8. Keep replies short and actionable.`;
 
   return `You are the AI assistant for "${context.orgName}".
 You are speaking with ${context.userName}.
