@@ -57,6 +57,17 @@ function withoutStaleBundleMcp(values: unknown): string[] | undefined {
   );
 }
 
+function addToolGrant(values: unknown, value: string): string[] {
+  return Array.from(
+    new Set([
+      ...(Array.isArray(values)
+        ? values.filter((item): item is string => typeof item === "string")
+        : []),
+      value,
+    ])
+  );
+}
+
 function collectToolNames(payload: any): string[] {
   const names = new Set<string>();
   const add = (tool: any) => {
@@ -125,12 +136,17 @@ ws.on("message", (data: WebSocket.Data) => {
     const baseHash = msg.payload?.hash || msg.payload?.baseHash;
     const currentConfig = parseConfig(msg.payload);
     console.log(`Got config hash: ${baseHash}`);
-    console.log("Registering CRM MCP server and cleaning stale bundle-mcp plugin entries...");
+    console.log("Registering CRM MCP server and granting bundled MCP tools...");
 
     const pluginAllow = withoutStaleBundleMcp(currentConfig.plugins?.allow);
-    const toolsAllow = withoutStaleBundleMcp(currentConfig.tools?.allow);
-    const toolsAlsoAllow = withoutStaleBundleMcp(currentConfig.tools?.alsoAllow);
     const toolsDeny = withoutStaleBundleMcp(currentConfig.tools?.deny);
+    const toolsAllow = Array.isArray(currentConfig.tools?.allow)
+      ? addToolGrant(currentConfig.tools.allow, STALE_BUNDLE_MCP_PLUGIN_ID)
+      : undefined;
+    const toolsAlsoAllow = addToolGrant(
+      currentConfig.tools?.alsoAllow,
+      STALE_BUNDLE_MCP_PLUGIN_ID
+    );
 
     const configPatch = {
       plugins: {
@@ -141,7 +157,7 @@ ws.on("message", (data: WebSocket.Data) => {
       },
       tools: {
         ...(toolsAllow ? { allow: toolsAllow } : {}),
-        ...(toolsAlsoAllow ? { alsoAllow: toolsAlsoAllow } : {}),
+        alsoAllow: toolsAlsoAllow,
         ...(toolsDeny ? { deny: toolsDeny } : {}),
       },
       mcp: {

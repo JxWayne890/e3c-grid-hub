@@ -409,7 +409,7 @@ Use `scripts/register-mcp-with-openclaw.ts` from this repo as the template. Edit
 const MCP_URL = "https://api-yourapp.<host>.hstgr.cloud/mcp";
 ```
 
-The script registers the MCP server config under `mcp.servers.crm` with **`headers: { "x-mcp-secret": MCP_SHARED_SECRET }`** so OpenClaw includes the shared secret on every MCP call. Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, `bundle-mcp` is an internal tool namespace, not an installable plugin. Make sure `MCP_SHARED_SECRET` is in your local `.env` before running — the script aborts if it's missing or under 32 chars.
+The script registers the MCP server config under `mcp.servers.crm` with **`headers: { "x-mcp-secret": MCP_SHARED_SECRET }`** so OpenClaw includes the shared secret on every MCP call. It grants the internal MCP tool namespace through `tools.alsoAllow: ["bundle-mcp"]`. Do not add `bundle-mcp` to `plugins.allow` or `plugins.entries`; in current OpenClaw builds, `bundle-mcp` is an internal tool namespace, not an installable plugin. Make sure `MCP_SHARED_SECRET` is in your local `.env` before running — the script aborts if it's missing or under 32 chars.
 
 Run from your local machine with the env vars set:
 
@@ -421,7 +421,7 @@ Expected output:
 ```
 Authenticated! Fetching current config...
 Got config hash: <hash>
-Registering CRM MCP server and cleaning stale bundle-mcp plugin entries...
+Registering CRM MCP server and granting bundled MCP tools...
 MCP server registered successfully!
 Total tools available: N
 ```
