@@ -35,6 +35,27 @@ const pubKeyB64 = pubKeyRaw.toString("base64");
 
 const wsUrl = OPENCLAW_URL.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://") + "/rpc";
 const ws = new WebSocket(wsUrl, ["rpc"]);
+const STALE_BUNDLE_MCP_PLUGIN_ID = "bundle-mcp";
+
+function parseConfig(payload: any): any {
+  const raw = payload?.raw || payload?.config;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  return raw || payload || {};
+}
+
+function withoutStaleBundleMcp(values: unknown): string[] | undefined {
+  if (!Array.isArray(values)) return undefined;
+  return values.filter(
+    (value): value is string =>
+      typeof value === "string" && value !== STALE_BUNDLE_MCP_PLUGIN_ID
+  );
+}
 
 function collectToolNames(payload: any): string[] {
   const names = new Set<string>();
@@ -102,10 +123,27 @@ ws.on("message", (data: WebSocket.Data) => {
     }
 
     const baseHash = msg.payload?.hash || msg.payload?.baseHash;
+    const currentConfig = parseConfig(msg.payload);
     console.log(`Got config hash: ${baseHash}`);
-    console.log("Registering CRM MCP server...");
+    console.log("Registering CRM MCP server and cleaning stale bundle-mcp plugin entries...");
+
+    const pluginAllow = withoutStaleBundleMcp(currentConfig.plugins?.allow);
+    const toolsAllow = withoutStaleBundleMcp(currentConfig.tools?.allow);
+    const toolsAlsoAllow = withoutStaleBundleMcp(currentConfig.tools?.alsoAllow);
+    const toolsDeny = withoutStaleBundleMcp(currentConfig.tools?.deny);
 
     const configPatch = {
+      plugins: {
+        ...(pluginAllow ? { allow: pluginAllow } : {}),
+        entries: {
+          [STALE_BUNDLE_MCP_PLUGIN_ID]: null,
+        },
+      },
+      tools: {
+        ...(toolsAllow ? { allow: toolsAllow } : {}),
+        ...(toolsAlsoAllow ? { alsoAllow: toolsAlsoAllow } : {}),
+        ...(toolsDeny ? { deny: toolsDeny } : {}),
+      },
       mcp: {
         servers: {
           crm: {
